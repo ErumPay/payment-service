@@ -39,6 +39,7 @@ public class DutchPayService {
         validateCreateRequest(request);
 
         LocalDateTime now = LocalDateTime.now();
+        // [be] 영은 260519 1440 | 더치페이 선택 시점에는 가승인 전 세션만 CREATED 상태로 생성
         DutchPaySessionEntity session = DutchPaySessionEntity.created(
                 generateUniqueDutchOrderNo(now),
                 request.getHost_user_id(),
@@ -60,12 +61,13 @@ public class DutchPayService {
 
         DutchPaySessionEntity session = dutchPaySessionRepository.findById(sessionId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+        // [be] 영은 260519 1440 | 대표자 가승인은 세션당 한 번만 허용하고 성공 후 초대 가능한 IN_PROGRESS로 전환
         if (session.getStatus() != DutchPayStatus.CREATED || session.getHost_auth_payment() != null) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
 
         LocalDateTime now = LocalDateTime.now();
-        // [be] 영은 260519 1340 | PG 연동 전까지 대표자 가승인 성공을 AUTHORIZED 주문으로 임시 기록
+        // [be] 영은 260519 1440 | PG 연동 전까지 대표자 가승인 성공을 AUTHORIZED 주문으로 임시 기록
         OrderEntity hostAuthPayment = OrderEntity.toDutchHostAuthEntity(
                 generateUniqueOrderNo(now),
                 session.getOrder_name(),

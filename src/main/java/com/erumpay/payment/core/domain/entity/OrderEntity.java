@@ -96,6 +96,7 @@ public class OrderEntity {
             Long merchantId,
             String idempotencyKey,
             LocalDateTime createdAt) {
+        // [be] 영은 260519 1440 | 대표자 가승인은 실제 매입 전 AUTHORIZED 상태의 더치페이 주문으로 기록
         return OrderEntity.builder()
                 .order_no(orderNo)
                 .order_name(orderName)

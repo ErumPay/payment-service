@@ -36,6 +36,7 @@ public class DutchPaySessionEntity {
     private Long merchant_id;
     private String order_name;
 
+    // [be] 영은 260519 1440 | 세션은 가승인 전 먼저 생성되므로 대표자 가승인 결제는 nullable
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "host_auth_payment_id", unique = true)
     private OrderEntity host_auth_payment;
