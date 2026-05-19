@@ -12,6 +12,7 @@ import com.erumpay.payment.qr.domain.dto.QrResponse;
 import com.erumpay.payment.qr.domain.dto.QrValidateRequest;
 import com.erumpay.payment.qr.service.QrService;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -25,7 +26,7 @@ public class QrController {
 
     @PostMapping(value = "/request", produces = MediaType.IMAGE_PNG_VALUE)
     public ResponseEntity<byte[]> createQR(
-            @RequestBody QrRequest request) throws Exception {
+            @Valid @RequestBody QrRequest request) throws Exception {
         log.info("/qr/request Controller");
 
         return qrService.createQR(request);

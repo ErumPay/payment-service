@@ -2,16 +2,21 @@ server:
   port: 8083
 
 spring:
+  config:
+    import: optional:file:.env[.properties],optional:file:.env.local[.properties]
   application:
     name: payment
 
   datasource:
-    url: jdbc:mysql://localhost:3308/payment_db
-    username: root
-    password: 1234
+    url: ${DB_URL:jdbc:mysql://localhost:3308/payment_db}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:1234}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
     hibernate:
       ddl-auto: update
     show-sql: true
+
+  qr:
+    baseUrl: ${QR_BASEURL:http://localhost:8083/qr?token=}

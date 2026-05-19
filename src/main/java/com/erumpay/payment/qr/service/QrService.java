@@ -7,6 +7,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -38,11 +39,14 @@ public class QrService {
         private final QrRepository qrRepository;
         private final OrderRepository orderRepository;
 
+        @Value("${spring.qr.baseUrl}")
+        private String qrBaseUrl;
+
         public ResponseEntity<byte[]> createQR(
                         QrRequest request) throws Exception {
 
                 log.info("/qr/request Service");
-                System.out.println(request);
+                log.debug("QR request: {}", request);
 
                 // order entity 생성
                 LocalDateTime now = LocalDateTime.now();
@@ -61,7 +65,7 @@ public class QrService {
                                 .toString()
                                 .replace("-", "");
 
-                String qrURL = "http://localhost:8083/qr?token=" + random;
+                String qrURL = qrBaseUrl + random;
 
                 log.info(random);
 
