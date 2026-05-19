@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.erumpay.payment.qr.domain.dto.QrRequest;
+import com.erumpay.payment.qr.domain.dto.QrResponse;
+import com.erumpay.payment.qr.domain.dto.QrValidateRequest;
 import com.erumpay.payment.qr.service.QrService;
 
 import lombok.RequiredArgsConstructor;
@@ -29,4 +31,10 @@ public class QrController {
         return qrService.createQR(request);
     }
 
+    @PostMapping("/validate")
+    public ResponseEntity<QrResponse> validateQR(@RequestBody QrValidateRequest request) {
+        log.info("/qr/validate Controller");
+
+        return qrService.validateQR(request);
+    }
 }

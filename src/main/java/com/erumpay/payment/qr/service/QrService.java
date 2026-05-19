@@ -13,8 +13,12 @@ import org.springframework.stereotype.Service;
 
 import com.erumpay.payment.core.dao.OrderRepository;
 import com.erumpay.payment.core.domain.entity.OrderEntity;
+import com.erumpay.payment.core.exception.CustomException;
+import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.qr.dao.QrRepository;
 import com.erumpay.payment.qr.domain.dto.QrRequest;
+import com.erumpay.payment.qr.domain.dto.QrResponse;
+import com.erumpay.payment.qr.domain.dto.QrValidateRequest;
 import com.erumpay.payment.qr.domain.entity.QrEntity;
 import com.google.zxing.BarcodeFormat;
 import com.google.zxing.client.j2se.MatrixToImageWriter;
@@ -43,7 +47,7 @@ public class QrService {
                 // order entity 생성
                 LocalDateTime now = LocalDateTime.now();
                 String orderNo = generateUniqueOrderNo(now);
-                OrderEntity order = OrderEntity.orderCreate(
+                OrderEntity order = OrderEntity.toEntity(
                                 orderNo,
                                 request.getOrder_name(),
                                 request.getAmount(),
@@ -102,4 +106,30 @@ public class QrService {
                                 .orElseThrow(() -> new IllegalStateException("Failed to generate unique order_no"));
         }
 
+        public ResponseEntity<QrResponse> validateQR(QrValidateRequest request) {
+                log.info("/qr/validate Service");
+
+                String token = request.getToken();
+                log.info("token={}", token);
+
+                if (token == null || token.isBlank()) {
+                        throw new CustomException(ErrorCode.QR_INVALID);
+                }
+
+                QrEntity qr = qrRepository.findByToken(token)
+                                .orElse(null);
+                if (qr == null) {
+                        throw new CustomException(ErrorCode.QR_NOT_FOUND);
+                }
+
+                LocalDateTime now = LocalDateTime.now();
+                if (qr.is_used()) {
+                        throw new CustomException(ErrorCode.QR_USED);
+                }
+                if (now.isAfter(qr.getExpired_at())) {
+                        throw new CustomException(ErrorCode.QR_EXPIRED);
+                }
+
+                return ResponseEntity.ok(QrResponse.fromOrderEntity(qr.getOrder(), "VALID"));
+        }
 }

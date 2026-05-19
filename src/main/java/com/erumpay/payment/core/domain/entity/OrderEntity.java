@@ -64,7 +64,7 @@ public class OrderEntity {
     private LocalDateTime paid_at;
     private LocalDateTime canceled_at;
 
-    public static OrderEntity orderCreate(
+    public static OrderEntity toEntity(
             String orderNo,
             String orderName,
             Long amount,
