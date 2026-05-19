@@ -2,7 +2,7 @@ package com.erumpay.payment.qr.domain.entity;
 
 import java.time.LocalDateTime;
 
-import com.erumpay.payment.core.domain.entity.OrderEntity;
+import com.erumpay.payment.core.domain.entity.CoreEntity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -31,7 +31,7 @@ public class QrEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "payment_id", nullable = false)
-    private OrderEntity order;
+    private CoreEntity order;
 
     private String token_hash;
 
@@ -43,7 +43,7 @@ public class QrEntity {
     private LocalDateTime expired_at;
 
     public static QrEntity toEntity(
-            OrderEntity order,
+            CoreEntity order,
             String tokenHash,
             LocalDateTime createdAt,
             LocalDateTime expiredAt) {

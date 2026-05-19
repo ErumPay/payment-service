@@ -4,9 +4,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import com.erumpay.payment.core.domain.entity.OrderEntity;
+import com.erumpay.payment.core.domain.entity.CoreEntity;
 
-public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
-    @Query("select count(o) > 0 from OrderEntity o where o.order_no = :orderNo")
+public interface CoreRepository extends JpaRepository<CoreEntity, Long> {
+    @Query("select count(o) > 0 from CoreEntity o where o.order_no = :orderNo")
     boolean existsByOrderNo(@Param("orderNo") String orderNo);
+
+    boolean existsByIdempotencyKey(String idempotencyKey);
 }

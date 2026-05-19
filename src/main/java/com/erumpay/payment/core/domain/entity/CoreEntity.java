@@ -3,6 +3,7 @@ package com.erumpay.payment.core.domain.entity;
 import java.time.LocalDateTime;
 import java.util.Locale;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -21,7 +22,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @AllArgsConstructor
 @NoArgsConstructor
-public class OrderEntity {
+public class CoreEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -42,9 +43,11 @@ public class OrderEntity {
     private LocalDateTime created_at;
 
     // FE 요청 id
-    private String idempotency_key;
+    @Column(name = "idempotency_key")
+    private String idempotencyKey;
 
     private Long user_id;
+    @Enumerated(EnumType.STRING)
     private PaymentType payment_type;
 
     // 가맹점 정보
@@ -68,14 +71,30 @@ public class OrderEntity {
     private LocalDateTime paid_at;
     private LocalDateTime canceled_at;
 
-    public static OrderEntity toEntity(
+    public void preparePayment(
+            String idempotencyKey,
+            PaymentType paymentType,
+            DutchRole dutchRole,
+            Long dutchSessionId,
+            Long remoteRequestId,
+            LocalDateTime updatedAt) {
+        this.idempotencyKey = idempotencyKey;
+        this.payment_type = paymentType;
+        this.dutch_role = dutchRole;
+        this.dutch_session_id = dutchSessionId;
+        this.remote_request_id = remoteRequestId;
+        this.payment_status = PaymentStatus.PAY_PENDING;
+        this.updated_at = updatedAt;
+    }
+
+    public static CoreEntity toEntity(
             String orderNo,
             String orderName,
             Long amount,
             Long merchantId,
             String channelType,
             LocalDateTime createdAt) {
-        return OrderEntity.builder()
+        return CoreEntity.builder()
                 .order_no(orderNo)
                 .order_name(orderName)
                 .amount(amount)
