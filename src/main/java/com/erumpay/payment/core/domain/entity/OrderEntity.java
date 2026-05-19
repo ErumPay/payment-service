@@ -1,6 +1,7 @@
 package com.erumpay.payment.core.domain.entity;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -44,6 +45,7 @@ public class OrderEntity {
     private String idempotency_key;
 
     private Long user_id;
+    @Enumerated(EnumType.STRING)
     private PaymentType payment_type;
 
     // 가맹점 정보
@@ -55,10 +57,13 @@ public class OrderEntity {
 
     // 더치 or 원격
     private Long dutch_session_id;
+
+    @Enumerated(EnumType.STRING)
     private DutchRole dutch_role;
     private Long remote_request_id;
 
     // 결제 정보
+    @Enumerated(EnumType.STRING)
     private FailCode fail_code;
     private LocalDateTime updated_at;
     private LocalDateTime paid_at;
@@ -76,11 +81,40 @@ public class OrderEntity {
                 .order_name(orderName)
                 .amount(amount)
                 .merchant_id(merchantId)
-                .channel_type(ChannelType.valueOf(channelType.toUpperCase()))
+                .channel_type(ChannelType.valueOf(channelType.trim().toUpperCase(Locale.ROOT)))
                 .payment_status(PaymentStatus.CREATED)
                 .created_at(createdAt)
                 .updated_at(createdAt)
                 .build();
+    }
+
+    public static OrderEntity toDutchHostAuthEntity(
+            String orderNo,
+            String orderName,
+            Long amount,
+            Long userId,
+            Long merchantId,
+            String idempotencyKey,
+            LocalDateTime createdAt) {
+        return OrderEntity.builder()
+                .order_no(orderNo)
+                .order_name(orderName)
+                .amount(amount)
+                .user_id(userId)
+                .merchant_id(merchantId)
+                .idempotency_key(idempotencyKey)
+                .channel_type(ChannelType.OFFLINE)
+                .payment_type(PaymentType.DUTCH)
+                .dutch_role(DutchRole.HOST)
+                .payment_status(PaymentStatus.AUTHORIZED)
+                .created_at(createdAt)
+                .updated_at(createdAt)
+                .build();
+    }
+
+    public void connectDutchSession(Long dutchSessionId) {
+        this.dutch_session_id = dutchSessionId;
+        this.updated_at = LocalDateTime.now();
     }
 
     public enum PaymentStatus {
