@@ -107,6 +107,43 @@ public class CoreEntity {
                 .build();
     }
 
+    public static OrderEntity toDutchHostAuthEntity(
+            String orderNo,
+            String orderName,
+            Long amount,
+            Long userId,
+            Long merchantId,
+            String idempotencyKey,
+            LocalDateTime createdAt) {
+        // [be] 영은 260519 1440 | 대표자 가승인은 실제 매입 전 AUTHORIZED 상태의 더치페이 주문으로 기록
+        return OrderEntity.builder()
+                .order_no(orderNo)
+                .order_name(orderName)
+                .amount(amount)
+                .user_id(userId)
+                .merchant_id(merchantId)
+                .idempotency_key(idempotencyKey)
+                .channel_type(ChannelType.OFFLINE)
+                .payment_type(PaymentType.DUTCH)
+                .dutch_role(DutchRole.HOST)
+                .payment_status(PaymentStatus.AUTHORIZED)
+                .created_at(createdAt)
+                .updated_at(createdAt)
+                .build();
+    }
+
+    public void connectDutchSession(Long dutchSessionId) {
+        if (dutchSessionId == null) {
+            throw new IllegalArgumentException("dutchSessionId must not be null");
+        }
+        if (this.dutch_session_id != null && !this.dutch_session_id.equals(dutchSessionId)) {
+            throw new IllegalStateException("Order is already connected to another dutch session");
+        }
+
+        this.dutch_session_id = dutchSessionId;
+        this.updated_at = LocalDateTime.now();
+    }
+
     public enum PaymentStatus {
         CREATED,
         PAY_PENDING,
