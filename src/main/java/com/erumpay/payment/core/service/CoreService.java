@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.Locale;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,10 +33,6 @@ public class CoreService {
         CoreEntity payment = coreRepository.findById(request.getPaymentId())
                 .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
 
-        if (coreRepository.existsByIdempotencyKey(request.getIdempotencyKey())) {
-            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
-        }
-
         CoreEntity.PaymentType paymentType = parsePaymentType(request.getPaymentType());
         LocalDateTime now = LocalDateTime.now();
 
@@ -45,7 +42,11 @@ public class CoreService {
                 paymentType,
                 now);
 
-        coreRepository.save(payment);
+        try {
+            coreRepository.saveAndFlush(payment);
+        } catch (DataIntegrityViolationException e) {
+            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
+        }
 
         if (paymentType == CoreEntity.PaymentType.SINGLE) {
             recommendCommandPublisher.publishRecommendationRequested(payment);
