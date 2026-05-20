@@ -26,7 +26,7 @@ public class CoreService {
     private final CoreRepository coreRepository;
     private final RecommendCommandPublisher recommendCommandPublisher;
 
-    public ResponseEntity<CoreResponse> prepare(CoreRequest request) {
+    public ResponseEntity<CoreResponse> prepare(Long userId, CoreRequest request) {
         log.info("/payment/prepare Service");
 
         CoreEntity payment = coreRepository.findById(request.getPaymentId())
@@ -41,7 +41,7 @@ public class CoreService {
 
         payment.preparePayment(
                 request.getIdempotencyKey(),
-                request.getUserId(),
+                userId,
                 paymentType,
                 now);
 

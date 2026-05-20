@@ -19,9 +19,6 @@ public class CoreRequest {
     private Long paymentId;
 
     @NotNull
-    private Long userId;
-
-    @NotNull
     private Long amount;
 
     @NotBlank

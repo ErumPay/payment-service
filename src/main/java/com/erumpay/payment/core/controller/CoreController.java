@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
 
 @RestController
 @RequestMapping("/api/v1/payment")
@@ -25,15 +26,17 @@ import org.springframework.web.bind.annotation.PathVariable;
 @Slf4j
 public class CoreController {
 
-    private final CoreService orderService;
+    private final CoreService coreService;
     private final CoreSseService coreSseService;
 
     @PostMapping("/prepare")
-    public ResponseEntity<CoreResponse> prepare(@Valid @RequestBody CoreRequest request) {
+    public ResponseEntity<CoreResponse> prepare(
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody CoreRequest request) {
 
         log.info("/payment/prepare Controller");
 
-        return orderService.prepare(request);
+        return coreService.prepare(userId, request);
     }
 
     @GetMapping("/{paymentId}/subscribe")
