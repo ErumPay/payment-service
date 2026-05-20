@@ -73,17 +73,18 @@ public class CoreEntity {
 
     public void preparePayment(
             String idempotencyKey,
+            Long userId,
             PaymentType paymentType,
-            DutchRole dutchRole,
-            Long dutchSessionId,
-            Long remoteRequestId,
             LocalDateTime updatedAt) {
         this.idempotencyKey = idempotencyKey;
+        this.user_id = userId;
         this.payment_type = paymentType;
-        this.dutch_role = dutchRole;
-        this.dutch_session_id = dutchSessionId;
-        this.remote_request_id = remoteRequestId;
         this.payment_status = PaymentStatus.PAY_PENDING;
+        this.updated_at = updatedAt;
+    }
+
+    public void assignDutchSession(Long dutchSessionId, LocalDateTime updatedAt) {
+        this.dutch_session_id = dutchSessionId;
         this.updated_at = updatedAt;
     }
 

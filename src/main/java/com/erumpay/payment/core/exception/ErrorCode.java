@@ -14,8 +14,11 @@ public enum ErrorCode {
 
     QR_INVALID(HttpStatus.BAD_REQUEST, "유효하지 않은 토큰입니다."),
 
+    DUPLICATED_REQUEST(HttpStatus.BAD_REQUEST, "중복된 요청입니다."),
+
     // 404
     QR_NOT_FOUND(HttpStatus.NOT_FOUND, "QR 토큰 정보를 찾을 수 없습니다."),
+    PAY_NOT_FOUND(HttpStatus.NOT_FOUND, "결제 정보를 찾을 수 없습니다."),
 
     // 410
     QR_EXPIRED(HttpStatus.GONE, "QR 토큰이 만료되었습니다."),
