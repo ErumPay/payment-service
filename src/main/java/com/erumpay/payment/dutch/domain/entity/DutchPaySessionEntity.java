@@ -62,6 +62,8 @@ public class DutchPaySessionEntity {
                 .merchant_id(merchantId)
                 .order_name(orderName)
                 .total_amount(totalAmount)
+                // [be] 영은 260520 2120 | 인원 확정 전 세션 생성 단계에서는 자율 입력을 기본 배분 방식으로 저장
+                .split_method(SplitMethod.CUSTOM)
                 .status(DutchPayStatus.CREATED)
                 .created_at(now)
                 .updated_at(now)
