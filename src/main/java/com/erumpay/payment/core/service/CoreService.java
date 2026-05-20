@@ -13,6 +13,7 @@ import com.erumpay.payment.core.domain.dto.CoreResponse;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
+import com.erumpay.payment.core.kafka.recommend.producer.RecommendCommandPublisher;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 @Transactional
 public class CoreService {
     private final CoreRepository coreRepository;
+    private final RecommendCommandPublisher recommendCommandPublisher;
 
     public ResponseEntity<CoreResponse> prepare(CoreRequest request) {
         log.info("/payment/prepare Service");
@@ -44,6 +46,10 @@ public class CoreService {
                 now);
 
         coreRepository.save(payment);
+
+        if (paymentType == CoreEntity.PaymentType.SINGLE) {
+            recommendCommandPublisher.publishRecommendationRequested(payment);
+        }
 
         return ResponseEntity.ok(CoreResponse.builder()
                 .paymentId(payment.getPayment_id())

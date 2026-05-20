@@ -2,8 +2,6 @@ server:
   port: 8083
 
 spring:
-  config:
-    import: optional:file:.env[.properties],optional:file:.env.local[.properties]
   application:
     name: payment
 
@@ -20,3 +18,14 @@ spring:
 
   qr:
     baseUrl: ${QR_BASEURL}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+app:
+  kafka:
+    topics:
+      recommend-command: ${RECOMMEND_COMMAND_TOPIC:recommend.command}
