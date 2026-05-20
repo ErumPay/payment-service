@@ -2,6 +2,7 @@ package com.erumpay.payment.core.domain.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -19,6 +20,7 @@ public class CoreRequest {
     private Long paymentId;
 
     @NotNull
+    @Positive
     private Long amount;
 
     @NotBlank

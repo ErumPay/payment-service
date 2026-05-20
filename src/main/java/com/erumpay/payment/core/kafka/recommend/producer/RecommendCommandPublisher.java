@@ -28,10 +28,21 @@ public class RecommendCommandPublisher {
                 .amount(payment.getAmount())
                 .build();
 
-        kafkaTemplate.send(recommendCommandTopic, String.valueOf(payment.getPaymentId()), message);
-        log.info("Published recommend command. topic={}, paymentId={}, eventType={}",
-                recommendCommandTopic,
-                payment.getPaymentId(),
-                EVENT_TYPE_RECOMMENDATION_REQUESTED);
+        kafkaTemplate.send(recommendCommandTopic, String.valueOf(payment.getPaymentId()), message)
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        log.error("Failed to publish recommend command. topic={}, paymentId={}, eventType={}",
+                                recommendCommandTopic,
+                                payment.getPaymentId(),
+                                EVENT_TYPE_RECOMMENDATION_REQUESTED,
+                                ex);
+                        return;
+                    }
+
+                    log.info("Published recommend command. topic={}, paymentId={}, eventType={}",
+                            recommendCommandTopic,
+                            payment.getPaymentId(),
+                            EVENT_TYPE_RECOMMENDATION_REQUESTED);
+                });
     }
 }
