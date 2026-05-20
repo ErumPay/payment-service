@@ -84,6 +84,7 @@ public class DutchPayService {
 
         DutchPaySessionEntity session = dutchPaySessionRepository.findById(sessionId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+        // [be] 영은 260520 2039 | 참여자 결제 prepare 전 더치 세션이 결제 가능한 상태인지 먼저 검증
         if (session.getStatus() != DutchPayStatus.IN_PROGRESS) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
@@ -94,6 +95,7 @@ public class DutchPayService {
                         request.getParticipant_id(),
                         request.getUser_id())
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+        // [be] 영은 260520 2039 | payment_orders 생성은 core가 담당하므로 더치는 참여자/금액/중복 여부만 검증
         if (participant.getStatus() != ParticipantStatus.PENDING
                 || participant.getPayment() != null
                 || participant.getAmount() == null
