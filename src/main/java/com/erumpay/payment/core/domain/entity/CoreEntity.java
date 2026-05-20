@@ -107,7 +107,7 @@ public class CoreEntity {
                 .build();
     }
 
-    public static OrderEntity toDutchHostAuthEntity(
+    public static CoreEntity toDutchHostAuthEntity(
             String orderNo,
             String orderName,
             Long amount,
@@ -116,13 +116,13 @@ public class CoreEntity {
             String idempotencyKey,
             LocalDateTime createdAt) {
         // [be] 영은 260519 1440 | 대표자 가승인은 실제 매입 전 AUTHORIZED 상태의 더치페이 주문으로 기록
-        return OrderEntity.builder()
+        return CoreEntity.builder()
                 .order_no(orderNo)
                 .order_name(orderName)
                 .amount(amount)
                 .user_id(userId)
                 .merchant_id(merchantId)
-                .idempotency_key(idempotencyKey)
+                .idempotencyKey(idempotencyKey)
                 .channel_type(ChannelType.OFFLINE)
                 .payment_type(PaymentType.DUTCH)
                 .dutch_role(DutchRole.HOST)
