@@ -114,6 +114,13 @@ public class OrderEntity {
     }
 
     public void connectDutchSession(Long dutchSessionId) {
+        if (dutchSessionId == null) {
+            throw new IllegalArgumentException("dutchSessionId must not be null");
+        }
+        if (this.dutch_session_id != null && !this.dutch_session_id.equals(dutchSessionId)) {
+            throw new IllegalStateException("Order is already connected to another dutch session");
+        }
+
         this.dutch_session_id = dutchSessionId;
         this.updated_at = LocalDateTime.now();
     }

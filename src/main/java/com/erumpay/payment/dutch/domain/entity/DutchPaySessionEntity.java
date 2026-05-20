@@ -69,6 +69,11 @@ public class DutchPaySessionEntity {
     }
 
     public void applyHostAuthorizationResult(boolean authorized) {
+        // [be] 영은 260520 2046 | 대표자 가승인 결과는 CREATED 세션에서만 최초 상태 전이를 허용
+        if (this.status != DutchPayStatus.CREATED) {
+            throw new IllegalStateException("Host authorization result can only be applied to CREATED session");
+        }
+
         this.status = authorized ? DutchPayStatus.IN_PROGRESS : DutchPayStatus.FAILED;
         this.updated_at = LocalDateTime.now();
     }

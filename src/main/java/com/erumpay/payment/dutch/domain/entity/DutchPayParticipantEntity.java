@@ -57,6 +57,13 @@ public class DutchPayParticipantEntity {
             Long userId,
             Long amount,
             LocalDateTime now) {
+        if (session == null || userId == null || now == null) {
+            throw new IllegalArgumentException("session, userId, and now must not be null");
+        }
+        if (amount != null && amount <= 0) {
+            throw new IllegalArgumentException("amount must be positive");
+        }
+
         return DutchPayParticipantEntity.builder()
                 .session(session)
                 .user_id(userId)
