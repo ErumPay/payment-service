@@ -6,6 +6,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.erumpay.payment.core.domain.dto.CoreRequest;
 import com.erumpay.payment.core.domain.dto.CoreResponse;
+import com.erumpay.payment.core.exception.CustomException;
+import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.core.service.CoreSseService;
 import com.erumpay.payment.core.service.CoreService;
 
@@ -40,7 +42,13 @@ public class CoreController {
     }
 
     @GetMapping("/{paymentId}/subscribe")
-    public SseEmitter sseStream(@PathVariable Long paymentId) {
+    public SseEmitter sseStream(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable Long paymentId) {
+        if (!coreService.userCanAccess(paymentId, userId)) {
+            throw new CustomException(ErrorCode.FORBIDDEN);
+        }
+
         log.info("/payment/{}/subscribe SSE subscribe", paymentId);
         return coreSseService.subscribe(paymentId);
     }

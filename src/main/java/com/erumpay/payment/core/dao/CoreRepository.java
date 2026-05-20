@@ -11,4 +11,6 @@ public interface CoreRepository extends JpaRepository<CoreEntity, Long> {
     boolean existsByOrderNo(@Param("orderNo") String orderNo);
 
     boolean existsByIdempotencyKey(String idempotencyKey);
+
+    boolean existsByPaymentIdAndUserId(Long paymentId, Long userId);
 }

@@ -16,6 +16,9 @@ public enum ErrorCode {
 
     DUPLICATED_REQUEST(HttpStatus.BAD_REQUEST, "중복된 요청입니다."),
 
+    // 403
+    FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
+
     // 404
     QR_NOT_FOUND(HttpStatus.NOT_FOUND, "QR 토큰 정보를 찾을 수 없습니다."),
     PAY_NOT_FOUND(HttpStatus.NOT_FOUND, "결제 정보를 찾을 수 없습니다."),

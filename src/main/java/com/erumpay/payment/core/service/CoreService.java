@@ -52,7 +52,7 @@ public class CoreService {
         }
 
         return ResponseEntity.ok(CoreResponse.builder()
-                .paymentId(payment.getPayment_id())
+                .paymentId(payment.getPaymentId())
                 .paymentStatus(payment.getPayment_status().name())
                 .build());
     }
@@ -64,6 +64,11 @@ public class CoreService {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
 
+    }
+
+    @Transactional(readOnly = true)
+    public boolean userCanAccess(Long paymentId, Long userId) {
+        return coreRepository.existsByPaymentIdAndUserId(paymentId, userId);
     }
 
 }

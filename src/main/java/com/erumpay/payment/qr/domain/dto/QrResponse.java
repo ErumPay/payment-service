@@ -24,7 +24,7 @@ public class QrResponse {
     public static QrResponse fromOrderEntity(CoreEntity entity, String code) {
         return QrResponse.builder()
                 .code(code)
-                .paymentId(entity.getPayment_id())
+                .paymentId(entity.getPaymentId())
                 .amount(entity.getAmount())
                 .order_name(entity.getOrder_name())
                 .channel_type(entity.getChannel_type().name())

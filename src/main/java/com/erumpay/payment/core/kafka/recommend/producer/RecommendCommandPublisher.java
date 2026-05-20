@@ -23,15 +23,15 @@ public class RecommendCommandPublisher {
     public void publishRecommendationRequested(CoreEntity payment) {
         RecommendCommandMessage message = RecommendCommandMessage.builder()
                 .eventType(EVENT_TYPE_RECOMMENDATION_REQUESTED)
-                .paymentId(payment.getPayment_id())
-                .userId(payment.getUser_id())
+                .paymentId(payment.getPaymentId())
+                .userId(payment.getUserId())
                 .amount(payment.getAmount())
                 .build();
 
-        kafkaTemplate.send(recommendCommandTopic, String.valueOf(payment.getPayment_id()), message);
+        kafkaTemplate.send(recommendCommandTopic, String.valueOf(payment.getPaymentId()), message);
         log.info("Published recommend command. topic={}, paymentId={}, eventType={}",
                 recommendCommandTopic,
-                payment.getPayment_id(),
+                payment.getPaymentId(),
                 EVENT_TYPE_RECOMMENDATION_REQUESTED);
     }
 }

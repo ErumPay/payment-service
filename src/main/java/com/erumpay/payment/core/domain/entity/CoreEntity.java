@@ -26,7 +26,8 @@ public class CoreEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long payment_id;
+    @Column(name = "payment_id")
+    private Long paymentId;
 
     // qr/request 때 저장
     private String order_no;
@@ -46,7 +47,8 @@ public class CoreEntity {
     @Column(name = "idempotency_key")
     private String idempotencyKey;
 
-    private Long user_id;
+    @Column(name = "user_id")
+    private Long userId;
     @Enumerated(EnumType.STRING)
     private PaymentType payment_type;
 
@@ -77,7 +79,7 @@ public class CoreEntity {
             PaymentType paymentType,
             LocalDateTime updatedAt) {
         this.idempotencyKey = idempotencyKey;
-        this.user_id = userId;
+        this.userId = userId;
         this.payment_type = paymentType;
         this.payment_status = PaymentStatus.PAY_PENDING;
         this.updated_at = updatedAt;
@@ -120,7 +122,7 @@ public class CoreEntity {
                 .order_no(orderNo)
                 .order_name(orderName)
                 .amount(amount)
-                .user_id(userId)
+                .userId(userId)
                 .merchant_id(merchantId)
                 .idempotencyKey(idempotencyKey)
                 .channel_type(ChannelType.OFFLINE)
