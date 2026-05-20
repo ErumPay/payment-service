@@ -11,7 +11,10 @@ import lombok.ToString;
 @ToString
 @AllArgsConstructor
 @NoArgsConstructor
-public class DutchPayHostAuthorizationRequest {
+public class DutchPayParticipantPaymentValidateRequest {
 
+    private Long participant_id;
+    private Long user_id;
+    private Long amount;
     private String idempotency_key;
 }

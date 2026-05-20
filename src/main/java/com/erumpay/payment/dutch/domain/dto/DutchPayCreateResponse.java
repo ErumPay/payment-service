@@ -31,9 +31,7 @@ public class DutchPayCreateResponse {
                 .host_user_id(session.getHost_user_id())
                 .merchant_id(session.getMerchant_id())
                 .order_name(session.getOrder_name())
-                .host_auth_payment_id(session.getHost_auth_payment() == null
-                        ? null
-                        : session.getHost_auth_payment().getPayment_id())
+                .host_auth_payment_id(session.getHost_auth_payment_id())
                 .total_amount(session.getTotal_amount())
                 .status(session.getStatus().name())
                 .build();

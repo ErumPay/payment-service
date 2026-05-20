@@ -11,11 +11,9 @@ import lombok.ToString;
 @ToString
 @AllArgsConstructor
 @NoArgsConstructor
-public class DutchPayCreateRequest {
+public class DutchPayHostAuthorizationResultRequest {
 
-    private Long host_payment_id;
-    private Long host_user_id;
-    private Long merchant_id;
-    private Long total_amount;
-    private String order_name;
+    private Long payment_id;
+    private String status;
+    private String fail_code;
 }

@@ -2,17 +2,12 @@ package com.erumpay.payment.dutch.domain.entity;
 
 import java.time.LocalDateTime;
 
-import com.erumpay.payment.core.domain.entity.OrderEntity;
-
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -35,11 +30,7 @@ public class DutchPaySessionEntity {
     private Long host_user_id;
     private Long merchant_id;
     private String order_name;
-
-    // [be] 영은 260519 1440 | 세션은 가승인 전 먼저 생성되므로 대표자 가승인 결제는 nullable
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "host_auth_payment_id", unique = true)
-    private OrderEntity host_auth_payment;
+    private Long host_auth_payment_id;
 
     private Long total_amount;
 
@@ -58,6 +49,7 @@ public class DutchPaySessionEntity {
 
     public static DutchPaySessionEntity created(
             String dutchOrderNo,
+            Long hostAuthPaymentId,
             Long hostUserId,
             Long merchantId,
             String orderName,
@@ -65,6 +57,7 @@ public class DutchPaySessionEntity {
             LocalDateTime now) {
         return DutchPaySessionEntity.builder()
                 .dutch_order_no(dutchOrderNo)
+                .host_auth_payment_id(hostAuthPaymentId)
                 .host_user_id(hostUserId)
                 .merchant_id(merchantId)
                 .order_name(orderName)
@@ -75,9 +68,8 @@ public class DutchPaySessionEntity {
                 .build();
     }
 
-    public void authorizeHostPayment(OrderEntity hostAuthPayment) {
-        this.host_auth_payment = hostAuthPayment;
-        this.status = DutchPayStatus.IN_PROGRESS;
+    public void applyHostAuthorizationResult(boolean authorized) {
+        this.status = authorized ? DutchPayStatus.IN_PROGRESS : DutchPayStatus.FAILED;
         this.updated_at = LocalDateTime.now();
     }
 

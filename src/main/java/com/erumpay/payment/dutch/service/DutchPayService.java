@@ -8,14 +8,17 @@ import java.util.stream.Stream;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.erumpay.payment.core.dao.OrderRepository;
-import com.erumpay.payment.core.domain.entity.OrderEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
+import com.erumpay.payment.dutch.dao.DutchPayParticipantRepository;
 import com.erumpay.payment.dutch.dao.DutchPaySessionRepository;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
-import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateResponse;
+import com.erumpay.payment.dutch.domain.entity.DutchPayParticipantEntity;
+import com.erumpay.payment.dutch.domain.entity.DutchPayParticipantEntity.ParticipantStatus;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity.DutchPayStatus;
 
@@ -30,18 +33,19 @@ public class DutchPayService {
     private static final DateTimeFormatter ORDER_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final int ORDER_RANDOM_DIGITS = 10;
 
-    private final OrderRepository orderRepository;
     private final DutchPaySessionRepository dutchPaySessionRepository;
+    private final DutchPayParticipantRepository dutchPayParticipantRepository;
 
     @Transactional
     public DutchPayCreateResponse createSession(DutchPayCreateRequest request) {
-        log.info("/api/v1/dutch-pay/sessions Service");
+        log.info("/internal/v1/dutch-pay/sessions Service");
         validateCreateRequest(request);
 
         LocalDateTime now = LocalDateTime.now();
-        // [be] 영은 260519 1440 | 더치페이 선택 시점에는 가승인 전 세션만 CREATED 상태로 생성
+        // [be] 영은 260520 1530 | core prepare가 만든 대표자 payment_id를 받아 더치 세션만 생성
         DutchPaySessionEntity session = DutchPaySessionEntity.created(
                 generateUniqueDutchOrderNo(now),
+                request.getHost_payment_id(),
                 request.getHost_user_id(),
                 request.getMerchant_id(),
                 request.getOrder_name(),
@@ -53,39 +57,61 @@ public class DutchPayService {
     }
 
     @Transactional
-    public DutchPayCreateResponse authorizeHostPayment(
+    public DutchPayCreateResponse applyHostAuthorizationResult(
             Long sessionId,
-            DutchPayHostAuthorizationRequest request) {
-        log.info("/api/v1/dutch-pay/sessions/{}/host-authorizations Service", sessionId);
-        validateHostAuthorizationRequest(sessionId, request);
+            DutchPayHostAuthorizationResultRequest request) {
+        log.info("/internal/v1/dutch-pay/sessions/{}/host-authorization-result Service", sessionId);
+        validateHostAuthorizationResultRequest(sessionId, request);
 
         DutchPaySessionEntity session = dutchPaySessionRepository.findById(sessionId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
-        // [be] 영은 260519 1440 | 대표자 가승인은 세션당 한 번만 허용하고 성공 후 초대 가능한 IN_PROGRESS로 전환
-        if (session.getStatus() != DutchPayStatus.CREATED || session.getHost_auth_payment() != null) {
+        if (!session.getHost_auth_payment_id().equals(request.getPayment_id())) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
 
-        LocalDateTime now = LocalDateTime.now();
-        // [be] 영은 260519 1440 | PG 연동 전까지 대표자 가승인 성공을 AUTHORIZED 주문으로 임시 기록
-        OrderEntity hostAuthPayment = OrderEntity.toDutchHostAuthEntity(
-                generateUniqueOrderNo(now),
-                session.getOrder_name(),
-                session.getTotal_amount(),
-                session.getHost_user_id(),
-                session.getMerchant_id(),
-                request.getIdempotency_key(),
-                now);
-        OrderEntity savedHostAuthPayment = orderRepository.save(hostAuthPayment);
-        savedHostAuthPayment.connectDutchSession(session.getSession_id());
+        // [be] 영은 260520 1530 | 대표자 가승인 결과만 반영하고 payment_orders 상태 변경은 core가 담당
+        session.applyHostAuthorizationResult("AUTHORIZED".equalsIgnoreCase(request.getStatus()));
 
-        session.authorizeHostPayment(savedHostAuthPayment);
+        return DutchPayCreateResponse.fromEntity(session, request.getStatus());
+    }
 
-        return DutchPayCreateResponse.fromEntity(session, "AUTHORIZED");
+    @Transactional(readOnly = true)
+    public DutchPayParticipantPaymentValidateResponse validateParticipantPayment(
+            Long sessionId,
+            DutchPayParticipantPaymentValidateRequest request) {
+        log.info("/internal/v1/dutch-pay/sessions/{}/participants/validate-payment Service", sessionId);
+        validateParticipantPaymentRequest(sessionId, request);
+
+        DutchPaySessionEntity session = dutchPaySessionRepository.findById(sessionId)
+                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+        if (session.getStatus() != DutchPayStatus.IN_PROGRESS) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        DutchPayParticipantEntity participant = dutchPayParticipantRepository
+                .findParticipantForPaymentValidation(
+                        sessionId,
+                        request.getParticipant_id(),
+                        request.getUser_id())
+                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+        if (participant.getStatus() != ParticipantStatus.PENDING
+                || participant.getPayment() != null
+                || participant.getAmount() == null
+                || !participant.getAmount().equals(request.getAmount())) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        return DutchPayParticipantPaymentValidateResponse.valid(
+                sessionId,
+                participant.getParticipant_id(),
+                participant.getUser_id(),
+                participant.getAmount(),
+                participant.getStatus().name());
     }
 
     private void validateCreateRequest(DutchPayCreateRequest request) {
         if (request == null
+                || request.getHost_payment_id() == null
                 || request.getHost_user_id() == null
                 || request.getMerchant_id() == null
                 || request.getTotal_amount() == null
@@ -96,26 +122,29 @@ public class DutchPayService {
         }
     }
 
-    private void validateHostAuthorizationRequest(
+    private void validateHostAuthorizationResultRequest(
             Long sessionId,
-            DutchPayHostAuthorizationRequest request) {
+            DutchPayHostAuthorizationResultRequest request) {
         if (sessionId == null
                 || request == null
-                || request.getIdempotency_key() == null
-                || request.getIdempotency_key().isBlank()) {
+                || request.getPayment_id() == null
+                || request.getStatus() == null
+                || request.getStatus().isBlank()) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
     }
 
-    private String generateUniqueOrderNo(LocalDateTime now) {
-        String datePart = now.format(ORDER_DATE_FORMAT);
-        String prefix = "ORD" + datePart + "EP";
-
-        return Stream.generate(() -> ThreadLocalRandom.current().nextLong(10_000_000_000L))
-                .map(randomNumber -> prefix + String.format("%0" + ORDER_RANDOM_DIGITS + "d", randomNumber))
-                .filter(orderNo -> !orderRepository.existsByOrderNo(orderNo))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Failed to generate unique order_no"));
+    private void validateParticipantPaymentRequest(
+            Long sessionId,
+            DutchPayParticipantPaymentValidateRequest request) {
+        if (sessionId == null
+                || request == null
+                || request.getParticipant_id() == null
+                || request.getUser_id() == null
+                || request.getAmount() == null
+                || request.getAmount() <= 0) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
     }
 
     private String generateUniqueDutchOrderNo(LocalDateTime now) {
