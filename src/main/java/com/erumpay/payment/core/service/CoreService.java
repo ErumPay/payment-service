@@ -7,6 +7,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.dto.CoreRequest;
@@ -49,7 +51,12 @@ public class CoreService {
         }
 
         if (paymentType == CoreEntity.PaymentType.SINGLE) {
-            recommendCommandPublisher.publishRecommendationRequested(payment);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    recommendCommandPublisher.publishRecommendationRequested(payment);
+                }
+            });
         }
 
         return ResponseEntity.ok(CoreResponse.builder()
