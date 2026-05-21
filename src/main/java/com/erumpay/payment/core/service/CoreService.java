@@ -44,12 +44,14 @@ public class CoreService {
                 paymentType,
                 now);
 
+        // [be] 다윤 260521 DB unique 처리
         try {
             coreRepository.saveAndFlush(payment);
         } catch (DataIntegrityViolationException e) {
             throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
         }
 
+        // [be] 다윤 260521 outbox pattern 변경 가능
         if (paymentType == CoreEntity.PaymentType.SINGLE) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override

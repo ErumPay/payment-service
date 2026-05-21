@@ -15,6 +15,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class CoreSseService {
 
+    // [be] 다윤 260521 SSE 로직 변경 예정
+
     private static final long SSE_TIMEOUT_MS = 60L * 60L * 1000L;
     private final Map<Long, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
 

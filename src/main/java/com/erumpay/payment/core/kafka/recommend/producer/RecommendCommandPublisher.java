@@ -28,6 +28,7 @@ public class RecommendCommandPublisher {
                 .amount(payment.getAmount())
                 .build();
 
+        // [be] 다윤 260521 kafka 비동기 처리 결과 분리
         kafkaTemplate.send(recommendCommandTopic, String.valueOf(payment.getPaymentId()), message)
                 .whenComplete((result, ex) -> {
                     if (ex != null) {
