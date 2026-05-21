@@ -80,6 +80,28 @@ public class DutchPaySessionEntity {
         this.updated_at = LocalDateTime.now();
     }
 
+    public void requireHost(Long userId) {
+        if (userId == null || !this.host_user_id.equals(userId)) {
+            throw new IllegalStateException("Only host can update dutch pay session");
+        }
+    }
+
+    public void requireInProgress() {
+        if (this.status != DutchPayStatus.IN_PROGRESS) {
+            throw new IllegalStateException("Dutch pay session is not in progress");
+        }
+    }
+
+    public void changeSplitMethod(SplitMethod splitMethod, LocalDateTime now) {
+        if (splitMethod == null || now == null) {
+            throw new IllegalArgumentException("splitMethod and now must not be null");
+        }
+        requireInProgress();
+
+        this.split_method = splitMethod;
+        this.updated_at = now;
+    }
+
     public enum SplitMethod {
         EQUAL,
         CUSTOM

@@ -74,6 +74,71 @@ public class DutchPayParticipantEntity {
                 .build();
     }
 
+    public static DutchPayParticipantEntity host(
+            DutchPaySessionEntity session,
+            Long userId,
+            LocalDateTime now) {
+        if (session == null || userId == null || now == null) {
+            throw new IllegalArgumentException("session, userId, and now must not be null");
+        }
+
+        return DutchPayParticipantEntity.builder()
+                .session(session)
+                .user_id(userId)
+                .status(ParticipantStatus.PENDING)
+                .created_at(now)
+                .updated_at(now)
+                .build();
+    }
+
+    public void confirm(LocalDateTime now) {
+        if (this.status == ParticipantStatus.INVITED) {
+            this.status = ParticipantStatus.PENDING;
+            this.updated_at = now;
+        }
+    }
+
+    public void reject(LocalDateTime now) {
+        if (this.status != ParticipantStatus.INVITED && this.status != ParticipantStatus.PENDING) {
+            throw new IllegalStateException("Only invited or pending participant can reject");
+        }
+
+        this.status = ParticipantStatus.REJECTED;
+        this.amount = null;
+        this.updated_at = now;
+    }
+
+    public void updateAmount(Long amount, LocalDateTime now) {
+        if (amount == null || amount <= 0) {
+            throw new IllegalArgumentException("amount must be positive");
+        }
+        if (this.status != ParticipantStatus.PENDING) {
+            throw new IllegalStateException("Only pending participant amount can be updated");
+        }
+
+        this.amount = amount;
+        this.updated_at = now;
+    }
+
+    public void assignAmount(Long amount, LocalDateTime now) {
+        if (amount == null || amount < 0) {
+            throw new IllegalArgumentException("amount must be zero or positive");
+        }
+        if (this.status != ParticipantStatus.PENDING) {
+            throw new IllegalStateException("Only pending participant amount can be assigned");
+        }
+
+        this.amount = amount;
+        this.updated_at = now;
+    }
+
+    public void clearAmount(LocalDateTime now) {
+        if (this.status == ParticipantStatus.PENDING) {
+            this.amount = null;
+            this.updated_at = now;
+        }
+    }
+
     public enum ParticipantStatus {
         INVITED,
         REJECTED,
