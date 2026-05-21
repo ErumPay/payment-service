@@ -35,6 +35,13 @@ public class CoreService {
         CoreEntity payment = coreRepository.findById(request.getPaymentId())
                 .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
 
+        if (payment.getUserId() != null && !payment.getUserId().equals(userId)) {
+            throw new CustomException(ErrorCode.FORBIDDEN);
+        }
+        if (payment.getPayment_status() != CoreEntity.PaymentStatus.CREATED) {
+            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
+        }
+
         CoreEntity.PaymentType paymentType = parsePaymentType(request.getPaymentType());
         LocalDateTime now = LocalDateTime.now();
 
