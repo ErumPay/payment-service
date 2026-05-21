@@ -102,7 +102,7 @@ public class DutchPayController {
     public ResponseEntity<DutchPaySessionDetailResponse> acceptInviteLink(
             @RequestHeader("X-User-Id") Long userId,
             @PathVariable String invite_token) {
-        log.info("/api/v1/dutch-pay/invite-links/{}/accept Controller", invite_token);
+        log.info("/api/v1/dutch-pay/invite-links/accept Controller");
 
         return ResponseEntity.ok(dutchPayService.acceptInviteLink(userId, invite_token));
     }

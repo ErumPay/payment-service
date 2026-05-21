@@ -3,6 +3,8 @@ package com.erumpay.payment.dutch.service;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
@@ -10,6 +12,9 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Stream;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,6 +50,9 @@ public class DutchPayService {
 
     private static final DateTimeFormatter ORDER_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final int ORDER_RANDOM_DIGITS = 10;
+    private static final long INVITE_TOKEN_TTL_MILLIS = 3L * 60L * 60L * 1000L;
+    private static final String INVITE_TOKEN_HMAC_ALGORITHM = "HmacSHA256";
+    private static final String DEFAULT_INVITE_TOKEN_SECRET = "erumpay-local-dutch-invite-token-secret";
 
     private final DutchPaySessionRepository dutchPaySessionRepository;
     private final DutchPayParticipantRepository dutchPayParticipantRepository;
@@ -180,10 +188,7 @@ public class DutchPayService {
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
         ensureHostInProgress(session, hostUserId);
 
-        String tokenRaw = sessionId + ":" + System.currentTimeMillis() + ":" + ThreadLocalRandom.current().nextLong();
-        String inviteToken = Base64.getUrlEncoder()
-                .withoutPadding()
-                .encodeToString(tokenRaw.getBytes(StandardCharsets.UTF_8));
+        String inviteToken = createSignedInviteToken(sessionId);
 
         return DutchPayInviteLinkResponse.builder()
                 .session_id(sessionId)
@@ -487,11 +492,69 @@ public class DutchPayService {
 
     private Long parseSessionIdFromInviteToken(String inviteToken) {
         try {
-            String decoded = new String(Base64.getUrlDecoder().decode(inviteToken), StandardCharsets.UTF_8);
-            return Long.valueOf(decoded.split(":")[0]);
+            String[] tokenParts = inviteToken.split("\\.");
+            if (tokenParts.length != 2) {
+                throw new IllegalArgumentException("Invalid invite token format");
+            }
+
+            String payload = new String(Base64.getUrlDecoder().decode(tokenParts[0]), StandardCharsets.UTF_8);
+            String expectedSignature = signInviteTokenPayload(payload);
+            if (!MessageDigest.isEqual(
+                    expectedSignature.getBytes(StandardCharsets.UTF_8),
+                    tokenParts[1].getBytes(StandardCharsets.UTF_8))) {
+                throw new IllegalArgumentException("Invalid invite token signature");
+            }
+
+            String[] payloadParts = payload.split(":");
+            if (payloadParts.length != 3) {
+                throw new IllegalArgumentException("Invalid invite token payload");
+            }
+
+            long expiresAtMillis = Long.parseLong(payloadParts[1]);
+            if (Instant.now().toEpochMilli() > expiresAtMillis) {
+                throw new IllegalArgumentException("Expired invite token");
+            }
+
+            return Long.valueOf(payloadParts[0]);
         } catch (RuntimeException e) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
+    }
+
+    private String createSignedInviteToken(Long sessionId) {
+        String payload = sessionId
+                + ":"
+                + (Instant.now().toEpochMilli() + INVITE_TOKEN_TTL_MILLIS)
+                + ":"
+                + ThreadLocalRandom.current().nextLong();
+        String encodedPayload = Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(payload.getBytes(StandardCharsets.UTF_8));
+
+        return encodedPayload + "." + signInviteTokenPayload(payload);
+    }
+
+    private String signInviteTokenPayload(String payload) {
+        try {
+            Mac mac = Mac.getInstance(INVITE_TOKEN_HMAC_ALGORITHM);
+            mac.init(new SecretKeySpec(resolveInviteTokenSecret().getBytes(StandardCharsets.UTF_8),
+                    INVITE_TOKEN_HMAC_ALGORITHM));
+
+            return Base64.getUrlEncoder()
+                    .withoutPadding()
+                    .encodeToString(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    private String resolveInviteTokenSecret() {
+        String secret = System.getenv("DUTCH_INVITE_TOKEN_SECRET");
+        if (secret == null || secret.isBlank()) {
+            return DEFAULT_INVITE_TOKEN_SECRET;
+        }
+
+        return secret;
     }
 
     private String generateUniqueDutchOrderNo(LocalDateTime now) {

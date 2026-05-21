@@ -1,5 +1,7 @@
 package com.erumpay.payment.dutch.domain.dto;
 
+import java.util.Objects;
+
 import com.erumpay.payment.dutch.domain.entity.DutchPayParticipantEntity;
 
 import lombok.Builder;
@@ -25,7 +27,7 @@ public class DutchPayParticipantResponse {
                 .amount(participant.getAmount())
                 .payment_id(participant.getPayment() == null ? null : participant.getPayment().getPaymentId())
                 .status(participant.getStatus().name())
-                .host(participant.getUser_id().equals(hostUserId))
+                .host(Objects.equals(participant.getUser_id(), hostUserId))
                 .build();
     }
 }

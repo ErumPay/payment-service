@@ -92,6 +92,8 @@ public class DutchPayParticipantEntity {
     }
 
     public void confirm(LocalDateTime now) {
+        validateNow(now);
+
         if (this.status == ParticipantStatus.INVITED) {
             this.status = ParticipantStatus.PENDING;
             this.updated_at = now;
@@ -99,6 +101,8 @@ public class DutchPayParticipantEntity {
     }
 
     public void reject(LocalDateTime now) {
+        validateNow(now);
+
         if (this.status != ParticipantStatus.INVITED && this.status != ParticipantStatus.PENDING) {
             throw new IllegalStateException("Only invited or pending participant can reject");
         }
@@ -109,6 +113,8 @@ public class DutchPayParticipantEntity {
     }
 
     public void updateAmount(Long amount, LocalDateTime now) {
+        validateNow(now);
+
         if (amount == null || amount <= 0) {
             throw new IllegalArgumentException("amount must be positive");
         }
@@ -121,6 +127,8 @@ public class DutchPayParticipantEntity {
     }
 
     public void assignAmount(Long amount, LocalDateTime now) {
+        validateNow(now);
+
         if (amount == null || amount < 0) {
             throw new IllegalArgumentException("amount must be zero or positive");
         }
@@ -133,9 +141,17 @@ public class DutchPayParticipantEntity {
     }
 
     public void clearAmount(LocalDateTime now) {
+        validateNow(now);
+
         if (this.status == ParticipantStatus.PENDING) {
             this.amount = null;
             this.updated_at = now;
+        }
+    }
+
+    private void validateNow(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
         }
     }
 
