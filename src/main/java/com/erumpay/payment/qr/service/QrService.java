@@ -12,8 +12,8 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
-import com.erumpay.payment.core.dao.OrderRepository;
-import com.erumpay.payment.core.domain.entity.OrderEntity;
+import com.erumpay.payment.core.dao.CoreRepository;
+import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.qr.dao.QrRepository;
@@ -37,7 +37,7 @@ public class QrService {
         private static final int ORDER_RANDOM_DIGITS = 10;
 
         private final QrRepository qrRepository;
-        private final OrderRepository orderRepository;
+        private final CoreRepository orderRepository;
 
         @Value("${spring.qr.baseUrl}")
         private String qrBaseUrl;
@@ -51,14 +51,14 @@ public class QrService {
                 // order entity 생성
                 LocalDateTime now = LocalDateTime.now();
                 String orderNo = generateUniqueOrderNo(now);
-                OrderEntity order = OrderEntity.toEntity(
+                CoreEntity order = CoreEntity.toEntity(
                                 orderNo,
                                 request.getOrder_name(),
                                 request.getAmount(),
                                 request.getMerchant_id(),
                                 request.getChannel_type(),
                                 now);
-                OrderEntity savedOrder = orderRepository.save(order);
+                CoreEntity savedOrder = orderRepository.save(order);
 
                 // 토큰 생성
                 String random = UUID.randomUUID()

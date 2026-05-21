@@ -16,7 +16,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-@RequestMapping("/qr")
+@RequestMapping("/api/v1/payment/qr")
 @RestController
 @Slf4j
 @RequiredArgsConstructor

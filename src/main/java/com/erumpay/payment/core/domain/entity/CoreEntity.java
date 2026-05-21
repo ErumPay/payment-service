@@ -3,6 +3,7 @@ package com.erumpay.payment.core.domain.entity;
 import java.time.LocalDateTime;
 import java.util.Locale;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -21,11 +22,12 @@ import lombok.NoArgsConstructor;
 @Getter
 @AllArgsConstructor
 @NoArgsConstructor
-public class OrderEntity {
+public class CoreEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long payment_id;
+    @Column(name = "payment_id")
+    private Long paymentId;
 
     // qr/request 때 저장
     private String order_no;
@@ -42,9 +44,11 @@ public class OrderEntity {
     private LocalDateTime created_at;
 
     // FE 요청 id
-    private String idempotency_key;
+    @Column(name = "idempotency_key")
+    private String idempotencyKey;
 
-    private Long user_id;
+    @Column(name = "user_id")
+    private Long userId;
     @Enumerated(EnumType.STRING)
     private PaymentType payment_type;
 
@@ -69,14 +73,31 @@ public class OrderEntity {
     private LocalDateTime paid_at;
     private LocalDateTime canceled_at;
 
-    public static OrderEntity toEntity(
+    public void preparePayment(
+            String idempotencyKey,
+            Long userId,
+            PaymentType paymentType,
+            LocalDateTime updatedAt) {
+        this.idempotencyKey = idempotencyKey;
+        this.userId = userId;
+        this.payment_type = paymentType;
+        this.payment_status = PaymentStatus.PAY_PENDING;
+        this.updated_at = updatedAt;
+    }
+
+    public void assignDutchSession(Long dutchSessionId, LocalDateTime updatedAt) {
+        this.dutch_session_id = dutchSessionId;
+        this.updated_at = updatedAt;
+    }
+
+    public static CoreEntity toEntity(
             String orderNo,
             String orderName,
             Long amount,
             Long merchantId,
             String channelType,
             LocalDateTime createdAt) {
-        return OrderEntity.builder()
+        return CoreEntity.builder()
                 .order_no(orderNo)
                 .order_name(orderName)
                 .amount(amount)
@@ -88,7 +109,7 @@ public class OrderEntity {
                 .build();
     }
 
-    public static OrderEntity toDutchHostAuthEntity(
+    public static CoreEntity toDutchHostAuthEntity(
             String orderNo,
             String orderName,
             Long amount,
@@ -97,13 +118,13 @@ public class OrderEntity {
             String idempotencyKey,
             LocalDateTime createdAt) {
         // [be] 영은 260519 1440 | 대표자 가승인은 실제 매입 전 AUTHORIZED 상태의 더치페이 주문으로 기록
-        return OrderEntity.builder()
+        return CoreEntity.builder()
                 .order_no(orderNo)
                 .order_name(orderName)
                 .amount(amount)
-                .user_id(userId)
+                .userId(userId)
                 .merchant_id(merchantId)
-                .idempotency_key(idempotencyKey)
+                .idempotencyKey(idempotencyKey)
                 .channel_type(ChannelType.OFFLINE)
                 .payment_type(PaymentType.DUTCH)
                 .dutch_role(DutchRole.HOST)

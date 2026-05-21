@@ -2,7 +2,7 @@ package com.erumpay.payment.dutch.domain.entity;
 
 import java.time.LocalDateTime;
 
-import com.erumpay.payment.core.domain.entity.OrderEntity;
+import com.erumpay.payment.core.domain.entity.CoreEntity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -43,7 +43,7 @@ public class DutchPayParticipantEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "payment_id")
-    private OrderEntity payment;
+    private CoreEntity payment;
 
     @Enumerated(EnumType.STRING)
     private ParticipantStatus status;

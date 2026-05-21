@@ -2,8 +2,6 @@ server:
   port: 8083
 
 spring:
-  config:
-    import: optional:file:.env[.properties],optional:file:.env.local[.properties]
   application:
     name: payment
 
@@ -20,3 +18,23 @@ spring:
 
   qr:
     baseUrl: ${QR_BASEURL}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP_ID:payment-core}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: '*'
+        spring.json.value.default.type: com.erumpay.payment.core.kafka.recommend.consumer.RecommendEventMessage
+
+app:
+  kafka:
+    topics:
+      recommend-command: ${RECOMMEND_COMMAND_TOPIC:recommend.command}
+      recommend-event: ${RECOMMEND_EVENT_TOPIC:recommend.event}
