@@ -2,6 +2,12 @@ package com.erumpay.payment.dutch.service;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Stream;
 
@@ -12,15 +18,22 @@ import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.dutch.dao.DutchPayParticipantRepository;
 import com.erumpay.payment.dutch.dao.DutchPaySessionRepository;
+import com.erumpay.payment.dutch.domain.dto.DutchPayAmountRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayInviteLinkResponse;
+import com.erumpay.payment.dutch.domain.dto.DutchPayInviteRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateResponse;
+import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantsConfirmRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPaySessionDetailResponse;
+import com.erumpay.payment.dutch.domain.dto.DutchPaySplitMethodRequest;
 import com.erumpay.payment.dutch.domain.entity.DutchPayParticipantEntity;
 import com.erumpay.payment.dutch.domain.entity.DutchPayParticipantEntity.ParticipantStatus;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity.DutchPayStatus;
+import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity.SplitMethod;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +65,7 @@ public class DutchPayService {
                 request.getTotal_amount(),
                 now);
         DutchPaySessionEntity savedSession = dutchPaySessionRepository.save(session);
+        dutchPayParticipantRepository.save(DutchPayParticipantEntity.host(savedSession, request.getHost_user_id(), now));
 
         return DutchPayCreateResponse.fromEntity(savedSession, "CREATED");
     }
@@ -111,6 +125,190 @@ public class DutchPayService {
                 participant.getStatus().name());
     }
 
+    @Transactional(readOnly = true)
+    public DutchPaySessionDetailResponse getSession(Long userId, Long sessionId) {
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
+        ensureSessionMember(session, participants, userId);
+
+        return DutchPaySessionDetailResponse.fromEntity(session, participants);
+    }
+
+    @Transactional(readOnly = true)
+    public List<DutchPaySessionDetailResponse> getActiveSessions(Long userId) {
+        if (userId == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        return dutchPaySessionRepository.findActiveSessionsByUserId(
+                userId,
+                List.of(DutchPayStatus.CREATED, DutchPayStatus.IN_PROGRESS)).stream()
+                .map(session -> DutchPaySessionDetailResponse.fromEntity(
+                        session,
+                        getParticipants(session.getSession_id())))
+                .toList();
+    }
+
+    @Transactional
+    public DutchPaySessionDetailResponse inviteAppFriends(
+            Long hostUserId,
+            Long sessionId,
+            DutchPayInviteRequest request) {
+        validateInviteRequest(hostUserId, sessionId, request);
+
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureHostInProgress(session, hostUserId);
+
+        LocalDateTime now = LocalDateTime.now();
+        Set<Long> uniqueUserIds = new HashSet<>(request.getUser_ids());
+        for (Long inviteeUserId : uniqueUserIds) {
+            if (inviteeUserId == null
+                    || inviteeUserId.equals(session.getHost_user_id())
+                    || dutchPayParticipantRepository.existsBySessionIdAndUserId(sessionId, inviteeUserId)) {
+                throw new CustomException(ErrorCode.BAD_REQUEST);
+            }
+
+            dutchPayParticipantRepository.save(
+                    DutchPayParticipantEntity.invited(session, inviteeUserId, null, now));
+        }
+
+        return toDetailResponse(sessionId);
+    }
+
+    @Transactional(readOnly = true)
+    public DutchPayInviteLinkResponse createInviteLink(Long hostUserId, Long sessionId) {
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureHostInProgress(session, hostUserId);
+
+        String tokenRaw = sessionId + ":" + System.currentTimeMillis() + ":" + ThreadLocalRandom.current().nextLong();
+        String inviteToken = Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(tokenRaw.getBytes(StandardCharsets.UTF_8));
+
+        return DutchPayInviteLinkResponse.builder()
+                .session_id(sessionId)
+                .invite_token(inviteToken)
+                .invite_url("/api/v1/dutch-pay/invite-links/" + inviteToken + "/accept")
+                .build();
+    }
+
+    @Transactional
+    public DutchPaySessionDetailResponse acceptInviteLink(Long userId, String inviteToken) {
+        if (userId == null || inviteToken == null || inviteToken.isBlank()) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        Long sessionId = parseSessionIdFromInviteToken(inviteToken);
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureInProgress(session);
+
+        if (userId.equals(session.getHost_user_id())
+                || dutchPayParticipantRepository.existsBySessionIdAndUserId(sessionId, userId)) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        dutchPayParticipantRepository.save(
+                DutchPayParticipantEntity.invited(session, userId, null, LocalDateTime.now()));
+
+        return toDetailResponse(sessionId);
+    }
+
+    @Transactional
+    public DutchPaySessionDetailResponse rejectInvite(Long userId, Long sessionId) {
+        if (userId == null || sessionId == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureInProgress(session);
+
+        DutchPayParticipantEntity participant = dutchPayParticipantRepository
+                .findBySessionIdAndUserId(sessionId, userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+        if (userId.equals(session.getHost_user_id())) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        participant.reject(LocalDateTime.now());
+        if (session.getSplit_method() == SplitMethod.CUSTOM) {
+            recalculateHostCustomAmount(session, getParticipants(sessionId), LocalDateTime.now());
+        }
+
+        return toDetailResponse(sessionId);
+    }
+
+    @Transactional
+    public DutchPaySessionDetailResponse confirmParticipants(
+            Long hostUserId,
+            Long sessionId,
+            DutchPayParticipantsConfirmRequest request) {
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureHostInProgress(session, hostUserId);
+
+        LocalDateTime now = LocalDateTime.now();
+        List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
+        if (participants.isEmpty()) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        participants.forEach(participant -> participant.confirm(now));
+
+        if (request != null && request.getSplit_method() != null && !request.getSplit_method().isBlank()) {
+            SplitMethod splitMethod = parseSplitMethod(request.getSplit_method());
+            session.changeSplitMethod(splitMethod, now);
+            applySplitMethod(session, participants, now);
+        }
+
+        return DutchPaySessionDetailResponse.fromEntity(session, participants);
+    }
+
+    @Transactional
+    public DutchPaySessionDetailResponse updateSplitMethod(
+            Long hostUserId,
+            Long sessionId,
+            DutchPaySplitMethodRequest request) {
+        if (request == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureHostInProgress(session, hostUserId);
+
+        LocalDateTime now = LocalDateTime.now();
+        List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
+        SplitMethod splitMethod = parseSplitMethod(request.getSplit_method());
+        session.changeSplitMethod(splitMethod, now);
+        applySplitMethod(session, participants, now);
+
+        return DutchPaySessionDetailResponse.fromEntity(session, participants);
+    }
+
+    @Transactional
+    public DutchPaySessionDetailResponse updateMyAmount(
+            Long userId,
+            Long sessionId,
+            DutchPayAmountRequest request) {
+        if (userId == null || sessionId == null || request == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureInProgress(session);
+        if (session.getSplit_method() != SplitMethod.CUSTOM || userId.equals(session.getHost_user_id())) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        DutchPayParticipantEntity participant = dutchPayParticipantRepository
+                .findBySessionIdAndUserId(sessionId, userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+        participant.updateAmount(request.getAmount(), LocalDateTime.now());
+
+        List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
+        recalculateHostCustomAmount(session, participants, LocalDateTime.now());
+
+        return DutchPaySessionDetailResponse.fromEntity(session, participants);
+    }
+
     private void validateCreateRequest(DutchPayCreateRequest request) {
         if (request == null
                 || request.getHost_payment_id() == null
@@ -145,6 +343,153 @@ public class DutchPayService {
                 || request.getUser_id() == null
                 || request.getAmount() == null
                 || request.getAmount() <= 0) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private void validateInviteRequest(
+            Long hostUserId,
+            Long sessionId,
+            DutchPayInviteRequest request) {
+        if (hostUserId == null
+                || sessionId == null
+                || request == null
+                || request.getUser_ids() == null
+                || request.getUser_ids().isEmpty()) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private DutchPaySessionEntity getSessionOrThrow(Long sessionId) {
+        if (sessionId == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        return dutchPaySessionRepository.findById(sessionId)
+                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+    }
+
+    private List<DutchPayParticipantEntity> getParticipants(Long sessionId) {
+        return dutchPayParticipantRepository.findBySessionIdOrderByParticipantId(sessionId);
+    }
+
+    private DutchPaySessionDetailResponse toDetailResponse(Long sessionId) {
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        return DutchPaySessionDetailResponse.fromEntity(session, getParticipants(sessionId));
+    }
+
+    private void ensureHostInProgress(DutchPaySessionEntity session, Long hostUserId) {
+        try {
+            session.requireHost(hostUserId);
+            session.requireInProgress();
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private void ensureInProgress(DutchPaySessionEntity session) {
+        try {
+            session.requireInProgress();
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private void ensureSessionMember(
+            DutchPaySessionEntity session,
+            List<DutchPayParticipantEntity> participants,
+            Long userId) {
+        if (userId == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+        if (session.getHost_user_id().equals(userId)) {
+            return;
+        }
+
+        boolean participant = participants.stream()
+                .anyMatch(item -> item.getUser_id().equals(userId));
+        if (!participant) {
+            throw new CustomException(ErrorCode.FORBIDDEN);
+        }
+    }
+
+    private SplitMethod parseSplitMethod(String splitMethod) {
+        try {
+            return SplitMethod.valueOf(splitMethod.trim().toUpperCase(Locale.ROOT));
+        } catch (RuntimeException e) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private void applySplitMethod(
+            DutchPaySessionEntity session,
+            List<DutchPayParticipantEntity> participants,
+            LocalDateTime now) {
+        // [be] 영은 260521 1621 | CUSTOM은 대표자에게 총액을 우선 배정하고 참여자 입력분만큼 차감
+        if (session.getSplit_method() == SplitMethod.EQUAL) {
+            distributeEqualAmount(session, participants, now);
+            return;
+        }
+
+        participants.forEach(participant -> {
+            if (participant.getUser_id().equals(session.getHost_user_id())) {
+                participant.assignAmount(session.getTotal_amount(), now);
+                return;
+            }
+
+            participant.clearAmount(now);
+        });
+    }
+
+    private void distributeEqualAmount(
+            DutchPaySessionEntity session,
+            List<DutchPayParticipantEntity> participants,
+            LocalDateTime now) {
+        List<DutchPayParticipantEntity> payableParticipants = participants.stream()
+                .filter(participant -> participant.getStatus() == ParticipantStatus.PENDING)
+                .toList();
+        if (payableParticipants.isEmpty()) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        long baseAmount = session.getTotal_amount() / payableParticipants.size();
+        long remainder = session.getTotal_amount() % payableParticipants.size();
+        for (DutchPayParticipantEntity participant : payableParticipants) {
+            long amount = baseAmount;
+            if (participant.getUser_id().equals(session.getHost_user_id())) {
+                amount += remainder;
+            }
+            participant.assignAmount(amount, now);
+        }
+    }
+
+    private void recalculateHostCustomAmount(
+            DutchPaySessionEntity session,
+            List<DutchPayParticipantEntity> participants,
+            LocalDateTime now) {
+        DutchPayParticipantEntity host = participants.stream()
+                .filter(participant -> participant.getUser_id().equals(session.getHost_user_id()))
+                .findFirst()
+                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+
+        long memberAmountSum = participants.stream()
+                .filter(participant -> !participant.getUser_id().equals(session.getHost_user_id()))
+                .filter(participant -> participant.getStatus() == ParticipantStatus.PENDING)
+                .map(DutchPayParticipantEntity::getAmount)
+                .filter(amount -> amount != null)
+                .reduce(0L, Long::sum);
+        if (memberAmountSum > session.getTotal_amount()) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        host.assignAmount(session.getTotal_amount() - memberAmountSum, now);
+    }
+
+    private Long parseSessionIdFromInviteToken(String inviteToken) {
+        try {
+            String decoded = new String(Base64.getUrlDecoder().decode(inviteToken), StandardCharsets.UTF_8);
+            return Long.valueOf(decoded.split(":")[0]);
+        } catch (RuntimeException e) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
     }
