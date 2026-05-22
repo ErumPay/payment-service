@@ -17,6 +17,9 @@ import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.core.kafka.recommend.producer.RecommendCommandPublisher;
+import com.erumpay.payment.dutch.domain.dto.DutchPayCreateRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
+import com.erumpay.payment.dutch.service.DutchPayService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,10 +31,12 @@ import lombok.extern.slf4j.Slf4j;
 public class CoreService {
     private final CoreRepository coreRepository;
     private final RecommendCommandPublisher recommendCommandPublisher;
+    private final DutchPayService dutchPayService;
 
     public ResponseEntity<CoreResponse> prepare(Long userId, CoreRequest request) {
         log.info("/payment/prepare Service");
 
+        // [be] 다윤 260522 유효성 검증
         CoreEntity payment = coreRepository.findById(request.getPaymentId())
                 .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
 
@@ -58,8 +63,27 @@ public class CoreService {
             throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
         }
 
+        if (paymentType == CoreEntity.PaymentType.DUTCH) {
+            if (!payment.getAmount().equals(request.getAmount())) {
+                throw new CustomException(ErrorCode.BAD_REQUEST);
+            }
+
+            DutchPayCreateResponse dutchResponse = dutchPayService.createSession(
+                    DutchPayCreateRequest.builder()
+                            .host_payment_id(request.getPaymentId())
+                            .host_user_id(userId)
+                            .merchant_id(payment.getMerchant_id())
+                            .total_amount(payment.getAmount())
+                            .order_name(payment.getOrder_name())
+                            .build());
+
+            // log.info("dutch session response: {}", dutchResponse);
+
+            payment.dutchSessionPayment(dutchResponse.getSession_id(), CoreEntity.DutchRole.HOST);
+        }
+
         // [be] 다윤 260521 outbox pattern 변경 가능
-        if (paymentType == CoreEntity.PaymentType.SINGLE) {
+        if (paymentType == CoreEntity.PaymentType.SINGLE || paymentType == CoreEntity.PaymentType.DUTCH) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {

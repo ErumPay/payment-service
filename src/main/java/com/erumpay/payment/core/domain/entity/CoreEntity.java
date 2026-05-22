@@ -49,6 +49,7 @@ public class CoreEntity {
 
     @Column(name = "user_id")
     private Long userId;
+
     @Enumerated(EnumType.STRING)
     private PaymentType payment_type;
 
@@ -59,11 +60,12 @@ public class CoreEntity {
     private String contact_phone;
     private String business_address;
 
-    // 더치 or 원격
+    // 더치
     private Long dutch_session_id;
-
     @Enumerated(EnumType.STRING)
     private DutchRole dutch_role;
+
+    // 원격
     private Long remote_request_id;
 
     // 결제 정보
@@ -83,6 +85,13 @@ public class CoreEntity {
         this.payment_type = paymentType;
         this.payment_status = PaymentStatus.PAY_PENDING;
         this.updated_at = updatedAt;
+    }
+
+    public void dutchSessionPayment(
+            Long dutch_session_id, DutchRole dutch_role) {
+        this.dutch_session_id = dutch_session_id;
+        this.dutch_role = dutch_role;
+        this.updated_at = LocalDateTime.now();
     }
 
     public void assignDutchSession(Long dutchSessionId, LocalDateTime updatedAt) {
