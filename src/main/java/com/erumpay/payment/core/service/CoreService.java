@@ -3,6 +3,7 @@ package com.erumpay.payment.core.service;
 import java.time.LocalDateTime;
 import java.util.Locale;
 
+import feign.FeignException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -10,9 +11,13 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import com.erumpay.payment.core.client.auth.AuthClient;
+import com.erumpay.payment.core.client.auth.dto.AuthRequest;
+import com.erumpay.payment.core.client.auth.dto.AuthResponse;
 import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.dto.CoreRequest;
 import com.erumpay.payment.core.domain.dto.CoreResponse;
+import com.erumpay.payment.core.domain.dto.PinRequest;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -26,8 +31,10 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Transactional
 public class CoreService {
+
     private final CoreRepository coreRepository;
     private final RecommendCommandPublisher recommendCommandPublisher;
+    private final AuthClient authClient;
 
     public ResponseEntity<CoreResponse> prepare(Long userId, CoreRequest request) {
         log.info("/payment/prepare Service");
@@ -86,6 +93,28 @@ public class CoreService {
     @Transactional(readOnly = true)
     public boolean userCanAccess(Long paymentId, Long userId) {
         return coreRepository.existsByPaymentIdAndUserId(paymentId, userId);
+    }
+
+    // [be] 다윤 260521 Feign 오류 분기처리 필요
+    public ResponseEntity<AuthResponse> pinVerify(Long userId, PinRequest request) {
+        AuthResponse res;
+        try {
+            res = authClient.verifyPaymentPassword(
+                    AuthRequest.builder()
+                            .pin(request.getPin())
+                            .userId(userId)
+                            .build());
+        } catch (FeignException.BadRequest e) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        } catch (FeignException e) {
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+
+        if (res == null || !res.isVerified()) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        return ResponseEntity.ok(res);
     }
 
 }

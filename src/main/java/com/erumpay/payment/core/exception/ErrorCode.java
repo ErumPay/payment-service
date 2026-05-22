@@ -13,7 +13,7 @@ public enum ErrorCode {
     BAD_REQUEST(HttpStatus.BAD_REQUEST, "잘못된 요청입니다."),
 
     QR_INVALID(HttpStatus.BAD_REQUEST, "유효하지 않은 토큰입니다."),
-
+    PIN_INVALID(HttpStatus.BAD_REQUEST, "잘못된 비밀번호입니다."),
     DUPLICATED_REQUEST(HttpStatus.BAD_REQUEST, "중복된 요청입니다."),
 
     // 403
