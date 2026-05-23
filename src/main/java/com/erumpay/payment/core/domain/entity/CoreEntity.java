@@ -77,6 +77,7 @@ public class CoreEntity {
             String idempotencyKey,
             Long userId,
             PaymentType paymentType,
+            DutchRole dutchRole,
             LocalDateTime updatedAt) {
         this.idempotencyKey = idempotencyKey;
         this.userId = userId;

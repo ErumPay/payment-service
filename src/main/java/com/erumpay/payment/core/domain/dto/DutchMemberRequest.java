@@ -14,10 +14,7 @@ import lombok.ToString;
 @ToString
 @AllArgsConstructor
 @NoArgsConstructor
-public class CoreRequest {
-
-    @NotNull
-    private Long paymentId;
+public class DutchMemberRequest {
 
     @NotNull
     @Positive
@@ -26,9 +23,15 @@ public class CoreRequest {
     @NotBlank
     private String idempotencyKey;
 
-    @NotBlank
-    private String paymentType;
+    @NotNull
+    @Positive
+    private Long sessionId;
 
-    private String dutchRole;
+    @NotNull
+    private String orderName;
+
+    @NotNull
+    @Positive
+    private Long merchantId;
 
 }
