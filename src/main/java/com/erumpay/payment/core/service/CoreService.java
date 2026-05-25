@@ -8,6 +8,7 @@ import feign.FeignException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -111,7 +112,7 @@ public class CoreService {
                     recommendCommandPublisher.publishRecommendationRequested(payment);
                 }
             });
-
+        }
         return ResponseEntity.ok(CoreResponse.builder()
                 .paymentId(payment.getPaymentId())
                 .paymentStatus(payment.getPayment_status().name())
