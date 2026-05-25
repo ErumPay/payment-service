@@ -37,7 +37,7 @@ public class QrService {
         private static final int ORDER_RANDOM_DIGITS = 10;
 
         private final QrRepository qrRepository;
-        private final CoreRepository orderRepository;
+        private final CoreRepository coreRepository;
 
         @Value("${spring.qr.baseUrl}")
         private String qrBaseUrl;
@@ -58,7 +58,7 @@ public class QrService {
                                 request.getMerchant_id(),
                                 request.getChannel_type(),
                                 now);
-                CoreEntity savedOrder = orderRepository.save(order);
+                CoreEntity savedOrder = coreRepository.save(order);
 
                 // 토큰 생성
                 String random = UUID.randomUUID()
@@ -98,14 +98,14 @@ public class QrService {
                                 .body(outputStream.toByteArray());
         }
 
-        private String generateUniqueOrderNo(LocalDateTime now) {
+        public String generateUniqueOrderNo(LocalDateTime now) {
                 String datePart = now.format(ORDER_DATE_FORMAT);
                 String prefix = "ORD" + datePart + "EP";
 
                 return Stream.generate(() -> ThreadLocalRandom.current().nextLong(10_000_000_000L))
                                 .map(randomNumber -> prefix
                                                 + String.format("%0" + ORDER_RANDOM_DIGITS + "d", randomNumber))
-                                .filter(orderNo -> !orderRepository.existsByOrderNo(orderNo))
+                                .filter(orderNo -> !coreRepository.existsByOrderNo(orderNo))
                                 .findFirst()
                                 .orElseThrow(() -> new IllegalStateException("Failed to generate unique order_no"));
         }
