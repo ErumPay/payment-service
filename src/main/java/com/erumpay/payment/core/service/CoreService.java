@@ -48,19 +48,21 @@ public class CoreService {
         if (payment.getUserId() != null && !payment.getUserId().equals(userId)) {
             throw new CustomException(ErrorCode.FORBIDDEN);
         }
+        if (!payment.getAmount().equals(request.getAmount())) {
+            throw new CustomException(ErrorCode.AMOUNT_MISMATCH);
+        }
         if (payment.getPayment_status() != CoreEntity.PaymentStatus.CREATED) {
             throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
         }
 
         CoreEntity.PaymentType paymentType = parsePaymentType(request.getPaymentType());
-        CoreEntity.DutchRole dutchRole = parseDutchRole(request.getDutchRole());
         LocalDateTime now = LocalDateTime.now();
 
         payment.preparePayment(
                 request.getIdempotencyKey(),
                 userId,
                 paymentType,
-                dutchRole,
+                CoreEntity.DutchRole.HOST,
                 now);
 
         // [be] 다윤 260521 DB unique 처리
@@ -102,7 +104,7 @@ public class CoreService {
                     .order_no(qrService.generateUniqueOrderNo(now))
                     .order_name(request.getOrderName())
                     .amount(request.getAmount())
-                    .payment_status(CoreEntity.PaymentStatus.CREATED)
+                    .payment_status(CoreEntity.PaymentStatus.PAY_PENDING)
                     .payment_type(CoreEntity.PaymentType.DUTCH)
                     .channel_type(CoreEntity.ChannelType.OFFLINE)
                     .dutch_role(CoreEntity.DutchRole.MEMBER)
@@ -144,21 +146,12 @@ public class CoreService {
                     .build()));
         }
 
-        throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
+        throw new CustomException(ErrorCode.REQUEST_IN_PROGRESS);
     }
 
     private CoreEntity.PaymentType parsePaymentType(String paymentType) {
         try {
             return CoreEntity.PaymentType.valueOf(paymentType.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
-        }
-
-    }
-
-    private CoreEntity.DutchRole parseDutchRole(String dutchRole) {
-        try {
-            return CoreEntity.DutchRole.valueOf(dutchRole.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
