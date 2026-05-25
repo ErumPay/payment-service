@@ -77,10 +77,12 @@ public class CoreEntity {
             String idempotencyKey,
             Long userId,
             PaymentType paymentType,
+            DutchRole dutchRole,
             LocalDateTime updatedAt) {
         this.idempotencyKey = idempotencyKey;
         this.userId = userId;
         this.payment_type = paymentType;
+        this.dutch_role = dutchRole;
         this.payment_status = PaymentStatus.PAY_PENDING;
         this.updated_at = updatedAt;
     }
