@@ -19,6 +19,9 @@ import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.core.kafka.recommend.producer.RecommendCommandPublisher;
+import com.erumpay.payment.dutch.domain.dto.DutchPayCreateRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
+import com.erumpay.payment.dutch.service.DutchPayService;
 import com.erumpay.payment.qr.service.QrService;
 
 import lombok.RequiredArgsConstructor;
@@ -31,11 +34,13 @@ import lombok.extern.slf4j.Slf4j;
 public class CoreService {
     private final CoreRepository coreRepository;
     private final RecommendCommandPublisher recommendCommandPublisher;
+    private final DutchPayService dutchPayService;
     private final QrService qrService;
 
     public ResponseEntity<CoreResponse> prepare(Long userId, CoreRequest request) {
         log.info("/payment/prepare Service");
 
+        // [be] 다윤 260522 유효성 검증
         Optional<ResponseEntity<CoreResponse>> idempotentResponse = validateIdempotency(userId,
                 request.getIdempotencyKey());
         if (idempotentResponse.isPresent()) {
@@ -71,14 +76,34 @@ public class CoreService {
         } catch (DataIntegrityViolationException e) {
             throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
         }
+        // [be] 다윤 260526 대표자 세션아이디 요청
+        if (paymentType == CoreEntity.PaymentType.DUTCH) {
+            if (!payment.getAmount().equals(request.getAmount())) {
+                throw new CustomException(ErrorCode.BAD_REQUEST);
+            }
+
+            DutchPayCreateResponse dutchResponse = dutchPayService.createSession(
+                    DutchPayCreateRequest.builder()
+                            .host_payment_id(request.getPaymentId())
+                            .host_user_id(userId)
+                            .merchant_id(payment.getMerchant_id())
+                            .total_amount(payment.getAmount())
+                            .order_name(payment.getOrder_name())
+                            .build());
+
+            // log.info("dutch session response: {}", dutchResponse);
+
+            payment.dutchSessionPayment(dutchResponse.getSession_id(), CoreEntity.DutchRole.HOST);
+        }
 
         // [be] 다윤 260521 outbox pattern 변경 가능
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                recommendCommandPublisher.publishRecommendationRequested(payment);
-            }
-        });
+        if (paymentType == CoreEntity.PaymentType.SINGLE || paymentType == CoreEntity.PaymentType.DUTCH) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    recommendCommandPublisher.publishRecommendationRequested(payment);
+                }
+            });
 
         return ResponseEntity.ok(CoreResponse.builder()
                 .paymentId(payment.getPaymentId())
