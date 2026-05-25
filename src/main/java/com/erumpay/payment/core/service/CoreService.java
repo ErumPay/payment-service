@@ -97,6 +97,7 @@ public class CoreService {
 
     // [be] 다윤 260521 Feign 오류 분기처리 필요
     public ResponseEntity<AuthResponse> pinVerify(Long userId, PinRequest request) {
+        log.info("/payment/pin Service");
         AuthResponse res;
         try {
             res = authClient.verifyPaymentPassword(
@@ -104,14 +105,19 @@ public class CoreService {
                             .pin(request.getPin())
                             .userId(userId)
                             .build());
-        } catch (FeignException.BadRequest e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+
+            log.info("auth feign response : {}", res);
         } catch (FeignException e) {
+            log.error("auth feign error. status={}, body={}", e.status(), e.contentUTF8());
+
+            if (e.status() == 400 || e.status() == 401 || e.status() == 404 || e.status() == 423) {
+                throw new CustomException(ErrorCode.PIN_INVALID);
+            }
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
 
         if (res == null || !res.isVerified()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.PIN_INVALID);
         }
 
         return ResponseEntity.ok(res);

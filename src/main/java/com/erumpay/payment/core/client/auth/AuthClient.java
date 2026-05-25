@@ -10,7 +10,7 @@ import com.erumpay.payment.core.client.auth.dto.AuthResponse;
 @FeignClient(name = "authClient", url = "${auth.base-url}")
 public interface AuthClient {
 
-    @PostMapping("/api/v1/internal/auth/pin/verify")
+    @PostMapping("/api/internal/auth/pin/verify")
     AuthResponse verifyPaymentPassword(
             @RequestBody AuthRequest request);
 }
