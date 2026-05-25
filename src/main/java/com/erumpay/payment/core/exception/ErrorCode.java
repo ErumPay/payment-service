@@ -11,10 +11,11 @@ public enum ErrorCode {
 
     // 400
     BAD_REQUEST(HttpStatus.BAD_REQUEST, "잘못된 요청입니다."),
-
     QR_INVALID(HttpStatus.BAD_REQUEST, "유효하지 않은 토큰입니다."),
     PIN_INVALID(HttpStatus.BAD_REQUEST, "잘못된 비밀번호입니다."),
+    AMOUNT_MISMATCH(HttpStatus.BAD_REQUEST, "잘못된 금액 요청입니다."),
     DUPLICATED_REQUEST(HttpStatus.BAD_REQUEST, "중복된 요청입니다."),
+    REQUEST_IN_PROGRESS(HttpStatus.CONFLICT, "요청 처리 중입니다."),
 
     // 403
     FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),

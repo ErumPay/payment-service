@@ -8,6 +8,7 @@ import com.erumpay.payment.core.client.auth.dto.AuthResponse;
 import com.erumpay.payment.core.domain.dto.CoreRequest;
 import com.erumpay.payment.core.domain.dto.CoreResponse;
 import com.erumpay.payment.core.domain.dto.PinRequest;
+import com.erumpay.payment.core.domain.dto.DutchMemberRequest;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.core.service.CoreSseService;
@@ -33,6 +34,7 @@ public class CoreController {
     private final CoreService coreService;
     private final CoreSseService coreSseService;
 
+    // [be] 다윤 260522 개인+대표자 결제 요청
     @PostMapping("/prepare")
     public ResponseEntity<CoreResponse> prepare(
             @RequestHeader("X-User-Id") Long userId,
@@ -41,6 +43,17 @@ public class CoreController {
         log.info("/payment/prepare Controller");
 
         return coreService.prepare(userId, request);
+    }
+
+    // [be] 다윤 260522 참여자 결제 요청
+    @PostMapping("/prepare-member")
+    public ResponseEntity<CoreResponse> prepareMember(
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody DutchMemberRequest request) {
+
+        log.info("/payment/prepare-member Controller");
+
+        return coreService.prepareMember(userId, request);
     }
 
     @GetMapping("/{paymentId}/subscribe")
@@ -65,4 +78,5 @@ public class CoreController {
         return coreService.pinVerify(userId, request);
     }
 
+}
 }
