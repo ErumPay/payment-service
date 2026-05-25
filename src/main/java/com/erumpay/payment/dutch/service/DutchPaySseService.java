@@ -32,7 +32,7 @@ public class DutchPaySseService {
     private final DutchPayParticipantRepository dutchPayParticipantRepository;
     private final Map<Long, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
-    // [be] 영은 260523 1120 | 세션 참여 권한을 확인한 뒤 세션별 SSE 구독자를 등록한다
+    // [be] 영은 260523 1220 | 세션 참여 권한을 확인한 뒤 세션별 SSE 구독자를 등록한다
     public SseEmitter subscribe(Long sessionId, Long userId) {
         DutchPaySessionDetailResponse session = getSessionForSse(sessionId, userId);
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
@@ -46,7 +46,7 @@ public class DutchPaySseService {
         return emitter;
     }
 
-    // [be] 영은 260523 1120 | 더치페이 상태 변경을 같은 세션을 보고 있는 모든 구독자에게 전송한다
+    // [be] 영은 260523 1220 | 더치페이 상태 변경을 같은 세션을 보고 있는 모든 구독자에게 전송한다
     public void publishSessionUpdated(
             Long sessionId,
             String eventType,
@@ -62,7 +62,7 @@ public class DutchPaySseService {
         }
     }
 
-    // [be] 영은 260523 1120 | SSE 구독 시작 시 요청자가 세션 대표자 또는 참여자인지 검증한다
+    // [be] 영은 260523 1220 | SSE 구독 시작 시 요청자가 세션 대표자 또는 참여자인지 검증한다
     private DutchPaySessionDetailResponse getSessionForSse(Long sessionId, Long userId) {
         if (sessionId == null || userId == null) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
@@ -80,7 +80,7 @@ public class DutchPaySseService {
         return DutchPaySessionDetailResponse.fromEntity(session, participants);
     }
 
-    // [be] 영은 260523 1120 | 단일 emitter 전송 실패 시 연결을 종료하고 구독 목록에서 제거한다
+    // [be] 영은 260523 1220 | 단일 emitter 전송 실패 시 연결을 종료하고 구독 목록에서 제거한다
     private void sendEvent(SseEmitter emitter, Long sessionId, String eventName, Object data) {
         try {
             emitter.send(SseEmitter.event()
@@ -94,16 +94,11 @@ public class DutchPaySseService {
         }
     }
 
-    // [be] 영은 260523 1120 | 완료/타임아웃/오류가 난 SSE 연결을 세션별 목록에서 정리한다
+    // [be] 영은 260523 1220 | 제거와 빈 목록 정리를 같은 compute 안에서 처리해 새 구독자 목록 삭제를 막는다
     private void removeEmitter(Long sessionId, SseEmitter emitter) {
-        List<SseEmitter> emitterList = emitters.get(sessionId);
-        if (emitterList == null) {
-            return;
-        }
-
-        emitterList.remove(emitter);
-        if (emitterList.isEmpty()) {
-            emitters.remove(sessionId);
-        }
+        emitters.computeIfPresent(sessionId, (key, emitterList) -> {
+            emitterList.remove(emitter);
+            return emitterList.isEmpty() ? null : emitterList;
+        });
     }
 }
