@@ -39,22 +39,24 @@ public class CoreController {
     @PostMapping("/prepare")
     public ResponseEntity<CoreResponse> prepare(
             @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody CoreRequest request) {
 
         log.info("/payment/prepare Controller");
 
-        return coreService.prepare(userId, request);
+        return coreService.prepare(userId, idempotencyKey, request);
     }
 
     // [be] 다윤 260522 참여자 결제 요청
     @PostMapping("/prepare-member")
     public ResponseEntity<CoreResponse> prepareMember(
             @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody DutchMemberRequest request) {
 
         log.info("/payment/prepare-member Controller");
 
-        return coreService.prepareMember(userId, request);
+        return coreService.prepareMember(userId, idempotencyKey, request);
     }
 
     // [be] 다윤 260526 결제 SSE 연결

@@ -24,9 +24,6 @@ public class CoreRequest {
     private Long amount;
 
     @NotBlank
-    private String idempotencyKey;
-
-    @NotBlank
     private String paymentType;
 
     private String dutchRole;

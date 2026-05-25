@@ -49,15 +49,10 @@ public class CoreService {
     private final QrService qrService;
 
     // [be] 다윤 260526 결제 요청 시작 - 개인, 더치페이 대표자
-    public ResponseEntity<CoreResponse> prepare(Long userId, CoreRequest request) {
+    public ResponseEntity<CoreResponse> prepare(Long userId, String idempotencyKey, CoreRequest request) {
         log.info("/payment/prepare Service");
 
-        // [be] 다윤 260522 유효성 검증
-        Optional<ResponseEntity<CoreResponse>> idempotentResponse = validateIdempotency(userId,
-                request.getIdempotencyKey());
-        if (idempotentResponse.isPresent()) {
-            return idempotentResponse.get();
-        }
+        String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
 
         CoreEntity payment = coreRepository.findById(request.getPaymentId())
                 .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
@@ -65,16 +60,23 @@ public class CoreService {
         if (payment.getUserId() != null && !payment.getUserId().equals(userId)) {
             throw new CustomException(ErrorCode.FORBIDDEN);
         }
+
+        Optional<ResponseEntity<CoreResponse>> idempotentResponse = validateIdempotency(userId, normalizedIdempotencyKey);
+        if (idempotentResponse.isPresent()) {
+            return idempotentResponse.get();
+        }
+
         if (!payment.getAmount().equals(request.getAmount())) {
             throw new CustomException(ErrorCode.AMOUNT_MISMATCH);
         }
+
         validatePrepareStatus(payment.getPayment_status());
 
         CoreEntity.PaymentType paymentType = parsePaymentType(request.getPaymentType());
         LocalDateTime now = LocalDateTime.now();
 
         payment.preparePayment(
-                request.getIdempotencyKey(),
+                normalizedIdempotencyKey,
                 userId,
                 paymentType,
                 now);
@@ -122,10 +124,13 @@ public class CoreService {
     }
 
     // [be] 다윤 260526 결제 요청 시작 - 더치페이 참여자
-    public ResponseEntity<CoreResponse> prepareMember(Long userId, DutchMemberRequest request) {
+    public ResponseEntity<CoreResponse> prepareMember(
+            Long userId,
+            String idempotencyKey,
+            DutchMemberRequest request) {
+        String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
 
-        Optional<ResponseEntity<CoreResponse>> idempotentResponse = validateIdempotency(userId,
-                request.getIdempotencyKey());
+        Optional<ResponseEntity<CoreResponse>> idempotentResponse = validateIdempotency(userId, normalizedIdempotencyKey);
         if (idempotentResponse.isPresent()) {
             return idempotentResponse.get();
         }
@@ -136,7 +141,7 @@ public class CoreService {
             payment = coreRepository.saveAndFlush(CoreEntity.builder()
                     .userId(userId)
                     .merchant_id(request.getMerchantId())
-                    .idempotencyKey(request.getIdempotencyKey())
+                    .idempotencyKey(normalizedIdempotencyKey)
                     .order_no(qrService.generateUniqueOrderNo(now))
                     .order_name(request.getOrderName())
                     .amount(request.getAmount())
@@ -149,7 +154,7 @@ public class CoreService {
                     .created_at(now)
                     .build());
         } catch (DataIntegrityViolationException e) {
-            Optional<ResponseEntity<CoreResponse>> replayed = validateIdempotency(userId, request.getIdempotencyKey());
+            Optional<ResponseEntity<CoreResponse>> replayed = validateIdempotency(userId, normalizedIdempotencyKey);
             if (replayed.isPresent()) {
                 return replayed.get();
             }
@@ -169,7 +174,14 @@ public class CoreService {
                 .build());
     }
 
-    // [be] 다윤 260526 멱등성 키 중복 체크, 주문번호 포함 변경 필요
+    private String normalizeIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+        return idempotencyKey.trim();
+    }
+
+    // [be] 다윤 260526 멱등성 키 중복 체크 (userId + idempotencyKey)
     private Optional<ResponseEntity<CoreResponse>> validateIdempotency(Long userId, String idempotencyKey) {
         Optional<CoreEntity> existing = coreRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey);
         if (existing.isEmpty()) {
