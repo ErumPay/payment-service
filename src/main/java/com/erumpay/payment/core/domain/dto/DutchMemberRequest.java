@@ -27,7 +27,7 @@ public class DutchMemberRequest {
     @Positive
     private Long sessionId;
 
-    @NotNull
+    @NotBlank
     private String orderName;
 
     @NotNull

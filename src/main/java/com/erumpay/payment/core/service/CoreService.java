@@ -120,7 +120,12 @@ public class CoreService {
             throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
         }
 
-        recommendCommandPublisher.publishRecommendationRequested(payment);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                recommendCommandPublisher.publishRecommendationRequested(payment);
+            }
+        });
 
         return ResponseEntity.ok(CoreResponse.builder()
                 .paymentId(payment.getPaymentId())
