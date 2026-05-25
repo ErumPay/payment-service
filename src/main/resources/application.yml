@@ -38,3 +38,6 @@ app:
     topics:
       recommend-command: ${RECOMMEND_COMMAND_TOPIC:recommend.command}
       recommend-event: ${RECOMMEND_EVENT_TOPIC:recommend.event}
+
+auth:
+  base-url: ${AUTH_BASE_URL}

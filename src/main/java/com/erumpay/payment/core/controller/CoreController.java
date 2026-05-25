@@ -4,8 +4,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.erumpay.payment.core.client.auth.dto.AuthResponse;
 import com.erumpay.payment.core.domain.dto.CoreRequest;
 import com.erumpay.payment.core.domain.dto.CoreResponse;
+import com.erumpay.payment.core.domain.dto.PinRequest;
 import com.erumpay.payment.core.domain.dto.DutchMemberRequest;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -66,4 +68,15 @@ public class CoreController {
         return coreSseService.subscribe(paymentId);
     }
 
+    @PostMapping("/pin")
+    public ResponseEntity<AuthResponse> pinVerify(
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody PinRequest request) {
+
+        log.info("/payment/pin controller");
+
+        return coreService.pinVerify(userId, request);
+    }
+
+}
 }
