@@ -1,8 +1,10 @@
 package com.erumpay.payment.core.service;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 import feign.FeignException;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +23,7 @@ import com.erumpay.payment.core.domain.dto.CoreRequest;
 import com.erumpay.payment.core.domain.dto.CoreResponse;
 import com.erumpay.payment.core.domain.dto.PinRequest;
 import com.erumpay.payment.core.domain.dto.DutchMemberRequest;
+import com.erumpay.payment.core.domain.dto.PayCreateRequest;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -45,6 +48,7 @@ public class CoreService {
     private final DutchPayService dutchPayService;
     private final QrService qrService;
 
+    // [be] 다윤 260526 결제 요청 시작 - 개인, 더치페이 대표자
     public ResponseEntity<CoreResponse> prepare(Long userId, CoreRequest request) {
         log.info("/payment/prepare Service");
 
@@ -64,9 +68,7 @@ public class CoreService {
         if (!payment.getAmount().equals(request.getAmount())) {
             throw new CustomException(ErrorCode.AMOUNT_MISMATCH);
         }
-        if (payment.getPayment_status() != CoreEntity.PaymentStatus.CREATED) {
-            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
-        }
+        validatePrepareStatus(payment.getPayment_status());
 
         CoreEntity.PaymentType paymentType = parsePaymentType(request.getPaymentType());
         LocalDateTime now = LocalDateTime.now();
@@ -75,7 +77,6 @@ public class CoreService {
                 request.getIdempotencyKey(),
                 userId,
                 paymentType,
-                CoreEntity.DutchRole.HOST,
                 now);
 
         // [be] 다윤 260521 DB unique 처리
@@ -84,6 +85,7 @@ public class CoreService {
         } catch (DataIntegrityViolationException e) {
             throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
         }
+
         // [be] 다윤 260526 대표자 세션아이디 요청
         if (paymentType == CoreEntity.PaymentType.DUTCH) {
             if (!payment.getAmount().equals(request.getAmount())) {
@@ -101,7 +103,7 @@ public class CoreService {
 
             // log.info("dutch session response: {}", dutchResponse);
 
-            payment.dutchSessionPayment(dutchResponse.getSession_id(), CoreEntity.DutchRole.HOST);
+            payment.hostDutchSessionPayment(dutchResponse.getSession_id(), CoreEntity.DutchRole.HOST);
         }
 
         // [be] 다윤 260521 outbox pattern 변경 가능
@@ -119,6 +121,7 @@ public class CoreService {
                 .build());
     }
 
+    // [be] 다윤 260526 결제 요청 시작 - 더치페이 참여자
     public ResponseEntity<CoreResponse> prepareMember(Long userId, DutchMemberRequest request) {
 
         Optional<ResponseEntity<CoreResponse>> idempotentResponse = validateIdempotency(userId,
@@ -166,6 +169,7 @@ public class CoreService {
                 .build());
     }
 
+    // [be] 다윤 260526 멱등성 키 중복 체크, 주문번호 포함 변경 필요
     private Optional<ResponseEntity<CoreResponse>> validateIdempotency(Long userId, String idempotencyKey) {
         Optional<CoreEntity> existing = coreRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey);
         if (existing.isEmpty()) {
@@ -231,4 +235,78 @@ public class CoreService {
         return ResponseEntity.ok(res);
     }
 
+    // [be] 다윤 260526 실결제 요청
+    public ResponseEntity<CoreResponse> request(Long userId, PayCreateRequest request) {
+
+        log.info("/payment/request Service");
+        log.debug("payCreateRequest : {} ", request);
+
+        CoreEntity payment = coreRepository.findById(request.getPaymentId())
+                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+
+        if (payment.getUserId() == null || !payment.getUserId().equals(userId)) {
+            throw new CustomException(ErrorCode.FORBIDDEN);
+        }
+        validateRequestStatus(payment.getPayment_status());
+        if (!payment.getAmount().equals(request.getTotalAmount())) {
+            throw new CustomException(ErrorCode.AMOUNT_MISMATCH);
+        }
+
+        long total = 0L;
+        Set<Long> cardIds = new HashSet<>();
+        for (PayCreateRequest.CardPortion card : request.getCards()) {
+            if (card.getCardId() == null || card.getAmount() == null || card.getAmount() <= 0) {
+                throw new CustomException(ErrorCode.BAD_REQUEST);
+            }
+            if (!cardIds.add(card.getCardId())) {
+                throw new CustomException(ErrorCode.BAD_REQUEST);
+            }
+            total += card.getAmount();
+        }
+
+        if (total != request.getTotalAmount()) {
+            throw new CustomException(ErrorCode.AMOUNT_MISMATCH);
+        }
+
+        payment.requestPayment(LocalDateTime.now());
+
+        return ResponseEntity.ok(CoreResponse.builder()
+                .paymentId(payment.getPaymentId())
+                .paymentStatus(payment.getPayment_status().name())
+                .build());
+    }
+
+    private void validatePrepareStatus(CoreEntity.PaymentStatus status) {
+        if (status == CoreEntity.PaymentStatus.CREATED) {
+            return;
+        }
+        if (status == CoreEntity.PaymentStatus.PAY_PENDING || status == CoreEntity.PaymentStatus.PG_PENDING) {
+            throw new CustomException(ErrorCode.REQUEST_IN_PROGRESS);
+        }
+        if (status == CoreEntity.PaymentStatus.PAID
+                || status == CoreEntity.PaymentStatus.AUTHORIZED
+                || status == CoreEntity.PaymentStatus.VOIDED
+                || status == CoreEntity.PaymentStatus.FAILED
+                || status == CoreEntity.PaymentStatus.EXPIRED) {
+            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
+        }
+        throw new CustomException(ErrorCode.BAD_REQUEST);
+    }
+
+    private void validateRequestStatus(CoreEntity.PaymentStatus status) {
+        if (status == CoreEntity.PaymentStatus.PAY_PENDING) {
+            return;
+        }
+        if (status == CoreEntity.PaymentStatus.PG_PENDING) {
+            throw new CustomException(ErrorCode.REQUEST_IN_PROGRESS);
+        }
+        if (status == CoreEntity.PaymentStatus.PAID
+                || status == CoreEntity.PaymentStatus.AUTHORIZED
+                || status == CoreEntity.PaymentStatus.VOIDED
+                || status == CoreEntity.PaymentStatus.FAILED
+                || status == CoreEntity.PaymentStatus.EXPIRED) {
+            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
+        }
+        throw new CustomException(ErrorCode.BAD_REQUEST);
+    }
 }

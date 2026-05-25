@@ -9,6 +9,7 @@ import com.erumpay.payment.core.domain.dto.CoreRequest;
 import com.erumpay.payment.core.domain.dto.CoreResponse;
 import com.erumpay.payment.core.domain.dto.PinRequest;
 import com.erumpay.payment.core.domain.dto.DutchMemberRequest;
+import com.erumpay.payment.core.domain.dto.PayCreateRequest;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.core.service.CoreSseService;
@@ -56,6 +57,7 @@ public class CoreController {
         return coreService.prepareMember(userId, request);
     }
 
+    // [be] 다윤 260526 결제 SSE 연결
     @GetMapping("/{paymentId}/subscribe")
     public SseEmitter sseStream(
             @RequestHeader("X-User-Id") Long userId,
@@ -68,6 +70,7 @@ public class CoreController {
         return coreSseService.subscribe(paymentId);
     }
 
+    // [be] 다윤 260526 비밀번호 확인
     @PostMapping("/pin")
     public ResponseEntity<AuthResponse> pinVerify(
             @RequestHeader("X-User-Id") Long userId,
@@ -76,6 +79,17 @@ public class CoreController {
         log.info("/payment/pin controller");
 
         return coreService.pinVerify(userId, request);
+    }
+
+    // [be] 다윤 260526 실결제 요청
+    @PostMapping("/request")
+    public ResponseEntity<CoreResponse> request(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestBody @Valid PayCreateRequest request) {
+
+        log.info("/payment/request controller");
+
+        return coreService.request(userId, request);
     }
 
 }
