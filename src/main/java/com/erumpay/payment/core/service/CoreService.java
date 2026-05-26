@@ -161,6 +161,11 @@ public class CoreService {
             }
             throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
         }
+        dutchPayService.registerParticipantPayment(
+                request.getSessionId(),
+                request.getParticipantId(),
+                userId,
+                payment);
 
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override

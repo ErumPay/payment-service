@@ -105,6 +105,18 @@ public class DutchPaySessionEntity {
         this.updated_at = now;
     }
 
+    // [be] 영은 260526 1620 | 모든 참여자 결제가 끝나면 세션을 완료 상태로 전환한다
+    public void complete(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        requireInProgress();
+
+        this.status = DutchPayStatus.COMPLETED;
+        this.completed_at = now;
+        this.updated_at = now;
+    }
+
     public enum SplitMethod {
         EQUAL,
         CUSTOM
