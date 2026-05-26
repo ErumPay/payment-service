@@ -1,5 +1,6 @@
 package com.erumpay.payment.dutch.dao;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -36,4 +37,45 @@ public interface DutchPaySessionRepository extends JpaRepository<DutchPaySession
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from DutchPaySessionEntity s where s.session_id = :sessionId")
     Optional<DutchPaySessionEntity> findByIdForUpdate(@Param("sessionId") Long sessionId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select s
+            from DutchPaySessionEntity s
+            where s.status = :status
+              and s.timeout_at is null
+              and s.created_at <= :timeoutThreshold
+            order by s.created_at asc
+            """)
+    List<DutchPaySessionEntity> findTimeoutTargetsForUpdate(
+            @Param("status") DutchPayStatus status,
+            @Param("timeoutThreshold") LocalDateTime timeoutThreshold);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select s
+            from DutchPaySessionEntity s
+            where s.status = :status
+              and s.timeout_at is null
+              and s.warning_1_sent_at is null
+              and s.created_at <= :warningThreshold
+            order by s.created_at asc
+            """)
+    List<DutchPaySessionEntity> findWarning1TargetsForUpdate(
+            @Param("status") DutchPayStatus status,
+            @Param("warningThreshold") LocalDateTime warningThreshold);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select s
+            from DutchPaySessionEntity s
+            where s.status = :status
+              and s.timeout_at is null
+              and s.warning_2_sent_at is null
+              and s.created_at <= :warningThreshold
+            order by s.created_at asc
+            """)
+    List<DutchPaySessionEntity> findWarning2TargetsForUpdate(
+            @Param("status") DutchPayStatus status,
+            @Param("warningThreshold") LocalDateTime warningThreshold);
 }

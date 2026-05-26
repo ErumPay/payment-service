@@ -117,6 +117,41 @@ public class DutchPaySessionEntity {
         this.updated_at = now;
     }
 
+    public void markWarning1Sent(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        requireInProgress();
+
+        if (this.warning_1_sent_at == null) {
+            this.warning_1_sent_at = now;
+            this.updated_at = now;
+        }
+    }
+
+    public void markWarning2Sent(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        requireInProgress();
+
+        if (this.warning_2_sent_at == null) {
+            this.warning_2_sent_at = now;
+            this.updated_at = now;
+        }
+    }
+
+    public void timeoutHandled(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        requireInProgress();
+
+        this.status = DutchPayStatus.TIMEOUT_HANDLED;
+        this.timeout_at = now;
+        this.updated_at = now;
+    }
+
     public enum SplitMethod {
         EQUAL,
         CUSTOM
