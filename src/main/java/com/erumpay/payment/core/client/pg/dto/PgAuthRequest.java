@@ -17,6 +17,7 @@ public class PgAuthRequest {
 
     private String billingKey;
 
-    private Long amount;
+    private Long originalAmount;
+    private Long approvedAmount;
 
 }
