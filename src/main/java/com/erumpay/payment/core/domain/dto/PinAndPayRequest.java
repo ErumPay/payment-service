@@ -2,8 +2,10 @@ package com.erumpay.payment.core.domain.dto;
 
 import java.util.List;
 
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -12,9 +14,12 @@ import lombok.NoArgsConstructor;
 
 @Builder
 @Getter
-@AllArgsConstructor
 @NoArgsConstructor
-public class PayCreateRequest {
+@AllArgsConstructor
+public class PinAndPayRequest {
+    @NotBlank
+    @Pattern(regexp = "^\\d{6}$", message = "pin must be 6 digits")
+    private String pin;
 
     @NotNull
     private Long paymentId;
@@ -40,5 +45,4 @@ public class PayCreateRequest {
         @Positive
         private Long amount;
     }
-
 }

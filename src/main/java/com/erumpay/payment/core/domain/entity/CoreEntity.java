@@ -105,6 +105,16 @@ public class CoreEntity {
         this.updated_at = updatedAt;
     }
 
+    // [be] 다윤 260526 실결제 성공 status 업데이트
+    public void paidPayment(LocalDateTime paidAt) {
+        if (paidAt == null) {
+            throw new IllegalArgumentException("paidAt must not be null");
+        }
+        this.payment_status = PaymentStatus.PAID;
+        this.paid_at = paidAt;
+        this.updated_at = paidAt;
+    }
+
     // [be] 다윤 260526 QR 생성시 new entity 생성
     public static CoreEntity toEntity(
             String orderNo,

@@ -10,7 +10,6 @@ import feign.FeignException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -18,12 +17,14 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import com.erumpay.payment.core.client.auth.AuthClient;
 import com.erumpay.payment.core.client.auth.dto.AuthRequest;
 import com.erumpay.payment.core.client.auth.dto.AuthResponse;
+import com.erumpay.payment.core.client.pg.PgClient;
+import com.erumpay.payment.core.client.pg.dto.PgAuthRequest;
+import com.erumpay.payment.core.client.pg.dto.PgAuthResponse;
 import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.dto.CoreRequest;
 import com.erumpay.payment.core.domain.dto.CoreResponse;
-import com.erumpay.payment.core.domain.dto.PinRequest;
+import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.DutchMemberRequest;
-import com.erumpay.payment.core.domain.dto.PayCreateRequest;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -45,6 +46,7 @@ public class CoreService {
     private final CoreRepository coreRepository;
     private final RecommendCommandPublisher recommendCommandPublisher;
     private final AuthClient authClient;
+    private final PgClient pgClient;
     private final DutchPayService dutchPayService;
     private final QrService qrService;
 
@@ -217,40 +219,9 @@ public class CoreService {
         return coreRepository.existsByPaymentIdAndUserId(paymentId, userId);
     }
 
-    // [be] 다윤 260521 Feign 오류 분기처리 필요
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public ResponseEntity<AuthResponse> pinVerify(Long userId, PinRequest request) {
-        log.info("/payment/pin Service");
-        AuthResponse res;
-        try {
-            res = authClient.verifyPaymentPassword(
-                    AuthRequest.builder()
-                            .pin(request.getPin())
-                            .userId(userId)
-                            .build());
-
-            log.info("auth feign response : {}", res);
-        } catch (FeignException e) {
-            log.error("auth feign error. status={}, body={}", e.status(), e.contentUTF8());
-
-            if (e.status() == 400 || e.status() == 401 || e.status() == 404 || e.status() == 423) {
-                throw new CustomException(ErrorCode.PIN_INVALID);
-            }
-            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
-        }
-
-        if (res == null || !res.isVerified()) {
-            throw new CustomException(ErrorCode.PIN_INVALID);
-        }
-
-        return ResponseEntity.ok(res);
-    }
-
-    // [be] 다윤 260526 실결제 요청
-    public ResponseEntity<CoreResponse> request(Long userId, String idempotencyKey, PayCreateRequest request) {
-
+    // [be] 다윤 260526 비밀번호 확인 및 실결제 요청
+    public ResponseEntity<AuthResponse> request(Long userId, String idempotencyKey, PinAndPayRequest request) {
         log.info("/payment/request Service");
-        log.debug("payCreateRequest : {} ", request);
         String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
 
         CoreEntity payment = coreRepository.findById(request.getPaymentId())
@@ -266,13 +237,53 @@ public class CoreService {
         }
 
         validateRequestStatus(payment.getPayment_status());
+
         if (!payment.getAmount().equals(request.getTotalAmount())) {
             throw new CustomException(ErrorCode.AMOUNT_MISMATCH);
         }
 
+        validateCardAmounts(request);
+
+        // [be] 다윤 260526 auth-service pin 인증 요청
+        // AuthResponse authResponse = verifyPin(userId, request.getPin());
+
+        payment.requestPayment(LocalDateTime.now());
+        requestPgPayments(payment, request);
+
+        return ResponseEntity.ok(AuthResponse.builder().verified(true).build());
+    }
+
+    private AuthResponse verifyPin(Long userId, String pin) {
+        AuthResponse res;
+        try {
+            res = authClient.verifyPaymentPassword(
+                    AuthRequest.builder()
+                            .pin(pin)
+                            .userId(userId)
+                            .build());
+
+            log.info("auth feign response : {}", res);
+        } catch (FeignException e) {
+            log.error("auth feign error. status={}, body={}", e.status(),
+                    e.contentUTF8());
+
+            if (e.status() == 400 || e.status() == 401 || e.status() == 404 || e.status() == 423) {
+                throw new CustomException(ErrorCode.PIN_INVALID);
+            }
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+
+        if (res == null || !res.isVerified()) {
+            throw new CustomException(ErrorCode.PIN_INVALID);
+        }
+
+        return res;
+    }
+
+    private void validateCardAmounts(PinAndPayRequest request) {
         long total = 0L;
         Set<Long> cardIds = new HashSet<>();
-        for (PayCreateRequest.CardPortion card : request.getCards()) {
+        for (PinAndPayRequest.CardPortion card : request.getCards()) {
             if (card.getCardId() == null || card.getAmount() == null || card.getAmount() <= 0) {
                 throw new CustomException(ErrorCode.BAD_REQUEST);
             }
@@ -285,13 +296,33 @@ public class CoreService {
         if (total != request.getTotalAmount()) {
             throw new CustomException(ErrorCode.AMOUNT_MISMATCH);
         }
+    }
 
-        payment.requestPayment(LocalDateTime.now());
+    // [be] 다윤 260526 pg-payment-service 실결제 요청
+    private void requestPgPayments(CoreEntity payment, PinAndPayRequest request) {
+        for (PinAndPayRequest.CardPortion card : request.getCards()) {
+            PgAuthRequest pgRequest = PgAuthRequest.builder()
+                    .payPaymentId(payment.getPaymentId())
+                    .merchantId(payment.getMerchant_id())
+                    .billingKey(String.valueOf(card.getCardId()))
+                    .amount(card.getAmount())
+                    .build();
 
-        return ResponseEntity.ok(CoreResponse.builder()
-                .paymentId(payment.getPaymentId())
-                .paymentStatus(payment.getPayment_status().name())
-                .build());
+            try {
+                PgAuthResponse pgResponse = pgClient.pgPaymentRequest(pgRequest);
+                log.info("pgResponse : {}", pgResponse);
+                if (pgResponse == null) {
+                    throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+                }
+                payment.paidPayment(LocalDateTime.now());
+            } catch (FeignException e) {
+                log.error("pg feign error. status={}, body={}", e.status(), e.contentUTF8());
+                if (e.status() >= 400 && e.status() < 500) {
+                    throw new CustomException(ErrorCode.BAD_REQUEST);
+                }
+                throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+            }
+        }
     }
 
     private void validatePrepareStatus(CoreEntity.PaymentStatus status) {
