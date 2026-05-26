@@ -1,18 +1,24 @@
 package com.erumpay.payment.dutch.service;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.dutch.dao.DutchPayParticipantRepository;
 import com.erumpay.payment.dutch.dao.DutchPaySessionRepository;
+import com.erumpay.payment.dutch.domain.dto.DutchPaySseRedisMessage;
 import com.erumpay.payment.dutch.domain.dto.DutchPaySessionDetailResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPaySseEventResponse;
 import com.erumpay.payment.dutch.domain.entity.DutchPayParticipantEntity;
@@ -30,6 +36,9 @@ public class DutchPaySseService {
 
     private final DutchPaySessionRepository dutchPaySessionRepository;
     private final DutchPayParticipantRepository dutchPayParticipantRepository;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final ObjectMapper objectMapper;
+    private final DutchPaySseTopicProperties dutchPaySseTopicProperties;
     private final Map<Long, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
     // [be] 영은 260523 1220 | 세션 참여 권한을 확인한 뒤 세션별 SSE 구독자를 등록한다
@@ -51,15 +60,26 @@ public class DutchPaySseService {
             Long sessionId,
             String eventType,
             DutchPaySessionDetailResponse session) {
+        try {
+            DutchPaySseRedisMessage message = DutchPaySseRedisMessage.of(sessionId, eventType);
+            stringRedisTemplate.convertAndSend(
+                    dutchPaySseTopicProperties.getSessionEvents(),
+                    objectMapper.writeValueAsString(message));
+        } catch (JsonProcessingException | RuntimeException e) {
+            log.warn("DutchPay SSE Redis publish failed. fallback to local emit. sessionId={}, eventType={}",
+                    sessionId, eventType, e);
+            sendLocalSessionUpdated(sessionId, eventType, session);
+        }
+    }
+
+    // [be] 영은 260526 1020 | Redis에서 받은 세션 변경 이벤트를 현재 서버에 연결된 SSE 구독자에게만 전송한다
+    public void sendLocalSessionUpdated(Long sessionId, String eventType) {
         List<SseEmitter> emitterList = emitters.get(sessionId);
         if (emitterList == null || emitterList.isEmpty()) {
             return;
         }
 
-        DutchPaySseEventResponse event = DutchPaySseEventResponse.of(eventType, session);
-        for (SseEmitter emitter : emitterList) {
-            sendEvent(emitter, sessionId, "session-updated", event);
-        }
+        sendLocalSessionUpdated(sessionId, eventType, getSessionForBroadcast(sessionId));
     }
 
     // [be] 영은 260523 1220 | SSE 구독 시작 시 요청자가 세션 대표자 또는 참여자인지 검증한다
@@ -78,6 +98,32 @@ public class DutchPaySseService {
         }
 
         return DutchPaySessionDetailResponse.fromEntity(session, participants);
+    }
+
+    // [be] 영은 260526 1020 | Redis Pub/Sub 수신 후 최신 DB 상태를 다시 읽어 SSE payload를 만든다
+    private DutchPaySessionDetailResponse getSessionForBroadcast(Long sessionId) {
+        DutchPaySessionEntity session = dutchPaySessionRepository.findById(sessionId)
+                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+        List<DutchPayParticipantEntity> participants =
+                dutchPayParticipantRepository.findBySessionIdOrderByParticipantId(sessionId);
+
+        return DutchPaySessionDetailResponse.fromEntity(session, participants);
+    }
+
+    // [be] 영은 260526 1020 | 한 서버 안에 연결된 구독자 목록을 복사해 전송 중 목록 변경과 충돌하지 않게 한다
+    private void sendLocalSessionUpdated(
+            Long sessionId,
+            String eventType,
+            DutchPaySessionDetailResponse session) {
+        List<SseEmitter> emitterList = emitters.get(sessionId);
+        if (emitterList == null || emitterList.isEmpty()) {
+            return;
+        }
+
+        DutchPaySseEventResponse event = DutchPaySseEventResponse.of(eventType, session);
+        for (SseEmitter emitter : new ArrayList<>(emitterList)) {
+            sendEvent(emitter, sessionId, "session-updated", event);
+        }
     }
 
     // [be] 영은 260523 1220 | 단일 emitter 전송 실패 시 연결을 종료하고 구독 목록에서 제거한다

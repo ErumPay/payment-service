@@ -33,11 +33,19 @@ spring:
         spring.json.trusted.packages: '*'
         spring.json.value.default.type: com.erumpay.payment.core.kafka.recommend.consumer.RecommendEventMessage
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
 app:
   kafka:
     topics:
       recommend-command: ${RECOMMEND_COMMAND_TOPIC:recommend.command}
       recommend-event: ${RECOMMEND_EVENT_TOPIC:recommend.event}
+  redis:
+    channels:
+      dutch-pay-session-events: ${DUTCH_PAY_SESSION_EVENT_CHANNEL:dutch-pay:session-events}
 
 auth:
   base-url: ${AUTH_BASE_URL}
