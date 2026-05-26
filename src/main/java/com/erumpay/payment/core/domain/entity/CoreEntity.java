@@ -75,32 +75,47 @@ public class CoreEntity {
     private LocalDateTime paid_at;
     private LocalDateTime canceled_at;
 
+    // [be] 다윤 260526 결제 요청 status 업데이트
     public void preparePayment(
             String idempotencyKey,
             Long userId,
             PaymentType paymentType,
-            DutchRole dutchRole,
             LocalDateTime updatedAt) {
         this.idempotencyKey = idempotencyKey;
         this.userId = userId;
         this.payment_type = paymentType;
-        this.dutch_role = dutchRole;
         this.payment_status = PaymentStatus.PAY_PENDING;
         this.updated_at = updatedAt;
     }
 
-    public void dutchSessionPayment(
+    // [be] 다윤 260526 대표자 세션아이디 업데이트
+    public void hostDutchSessionPayment(
             Long dutch_session_id, DutchRole dutch_role) {
         this.dutch_session_id = dutch_session_id;
         this.dutch_role = dutch_role;
         this.updated_at = LocalDateTime.now();
     }
 
-    public void assignDutchSession(Long dutchSessionId, LocalDateTime updatedAt) {
-        this.dutch_session_id = dutchSessionId;
+    // [be] 다윤 260526 실결제 status 업데이트
+    public void requestPayment(LocalDateTime updatedAt) {
+        if (updatedAt == null) {
+            throw new IllegalArgumentException("updatedAt must not be null");
+        }
+        this.payment_status = PaymentStatus.PG_PENDING;
         this.updated_at = updatedAt;
     }
 
+    // [be] 다윤 260526 실결제 성공 status 업데이트
+    public void paidPayment(LocalDateTime paidAt) {
+        if (paidAt == null) {
+            throw new IllegalArgumentException("paidAt must not be null");
+        }
+        this.payment_status = PaymentStatus.PAID;
+        this.paid_at = paidAt;
+        this.updated_at = paidAt;
+    }
+
+    // [be] 다윤 260526 QR 생성시 new entity 생성
     public static CoreEntity toEntity(
             String orderNo,
             String orderName,

@@ -7,7 +7,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.erumpay.payment.core.client.auth.dto.AuthResponse;
 import com.erumpay.payment.core.domain.dto.CoreRequest;
 import com.erumpay.payment.core.domain.dto.CoreResponse;
-import com.erumpay.payment.core.domain.dto.PinRequest;
+import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.DutchMemberRequest;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -38,24 +38,27 @@ public class CoreController {
     @PostMapping("/prepare")
     public ResponseEntity<CoreResponse> prepare(
             @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody CoreRequest request) {
 
         log.info("/payment/prepare Controller");
 
-        return coreService.prepare(userId, request);
+        return coreService.prepare(userId, idempotencyKey, request);
     }
 
     // [be] 다윤 260522 참여자 결제 요청
     @PostMapping("/prepare-member")
     public ResponseEntity<CoreResponse> prepareMember(
             @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody DutchMemberRequest request) {
 
         log.info("/payment/prepare-member Controller");
 
-        return coreService.prepareMember(userId, request);
+        return coreService.prepareMember(userId, idempotencyKey, request);
     }
 
+    // [be] 다윤 260526 결제 SSE 연결
     @GetMapping("/{paymentId}/subscribe")
     public SseEmitter sseStream(
             @RequestHeader("X-User-Id") Long userId,
@@ -68,14 +71,16 @@ public class CoreController {
         return coreSseService.subscribe(paymentId);
     }
 
-    @PostMapping("/pin")
-    public ResponseEntity<AuthResponse> pinVerify(
+    // [be] 다윤 260526 비밀번호 확인 및 실결제 요청
+    @PostMapping("/request")
+    public ResponseEntity<AuthResponse> request(
             @RequestHeader("X-User-Id") Long userId,
-            @Valid @RequestBody PinRequest request) {
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
+            @Valid @RequestBody PinAndPayRequest request) {
 
-        log.info("/payment/pin controller");
+        log.info("/payment/request controller");
 
-        return coreService.pinVerify(userId, request);
+        return coreService.request(userId, idempotencyKey, request);
     }
 
 }

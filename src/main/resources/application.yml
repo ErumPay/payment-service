@@ -41,3 +41,6 @@ app:
 
 auth:
   base-url: ${AUTH_BASE_URL}
+
+pg:
+  base-url: ${PG_BASE_URL}

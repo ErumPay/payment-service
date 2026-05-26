@@ -20,9 +20,6 @@ public class DutchMemberRequest {
     @Positive
     private Long amount;
 
-    @NotBlank
-    private String idempotencyKey;
-
     @NotNull
     @Positive
     private Long sessionId;
