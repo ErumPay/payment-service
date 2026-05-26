@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-public class PgAuthRequest {
+public class PgAuthPayRequest {
 
     private Long payPaymentId;
 
@@ -17,6 +17,7 @@ public class PgAuthRequest {
 
     private String billingKey;
 
-    private Long amount;
+    private Long originalAmount;
+    private Long approvedAmount;
 
 }

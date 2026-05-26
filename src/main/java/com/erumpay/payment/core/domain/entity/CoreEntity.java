@@ -97,7 +97,7 @@ public class CoreEntity {
     }
 
     // [be] 다윤 260526 실결제 status 업데이트
-    public void requestPayment(LocalDateTime updatedAt) {
+    public void pgRequestUpdateStatusPayment(LocalDateTime updatedAt) {
         if (updatedAt == null) {
             throw new IllegalArgumentException("updatedAt must not be null");
         }
@@ -106,7 +106,7 @@ public class CoreEntity {
     }
 
     // [be] 다윤 260526 실결제 성공 status 업데이트
-    public void paidPayment(LocalDateTime paidAt) {
+    public void paidStatusUpdatePayment(LocalDateTime paidAt) {
         if (paidAt == null) {
             throw new IllegalArgumentException("paidAt must not be null");
         }

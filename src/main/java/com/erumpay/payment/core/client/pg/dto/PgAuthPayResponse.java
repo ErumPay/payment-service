@@ -6,12 +6,14 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 @Builder
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-public class PgAuthResponse {
+@ToString
+public class PgAuthPayResponse {
 
     private Long pgTxnId;
 

@@ -11,7 +11,7 @@ import lombok.ToString;
 @ToString
 @AllArgsConstructor
 @NoArgsConstructor
-public class CoreResponse {
+public class PrepareResponse {
 
     private Long paymentId;
     private String paymentStatus;

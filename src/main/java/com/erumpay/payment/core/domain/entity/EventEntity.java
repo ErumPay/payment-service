@@ -1,5 +1,6 @@
 package com.erumpay.payment.core.domain.entity;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 import jakarta.persistence.Entity;
@@ -32,7 +33,7 @@ public class EventEntity {
     private EventType event_type;
 
     private String fail_code;
-    private LocalDateTime created_at;
+    private LocalDate created_at;
 
     @Enumerated(EnumType.STRING)
     private ActorType actor_type;
