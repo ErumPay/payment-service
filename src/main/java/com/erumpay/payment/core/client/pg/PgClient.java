@@ -17,4 +17,9 @@ public interface PgClient {
                         @RequestHeader("Idempotency-Key") String idempotencyKey,
                         @RequestBody PgAuthPayRequest request);
 
+        @PostMapping(value = "/internal/v1/pg/payments/auth-only", consumes = "application/json")
+        PgAuthPayResponse pgPaymentAuthOnlyRequest(
+                        @RequestHeader("Authorization") String authorization,
+                        @RequestHeader("Idempotency-Key") String idempotencyKey,
+                        @RequestBody PgAuthPayRequest request);
 }
