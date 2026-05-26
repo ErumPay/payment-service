@@ -3,7 +3,10 @@ package com.erumpay.payment.dutch.dao;
 import java.util.List;
 import java.util.Optional;
 
+import jakarta.persistence.LockModeType;
+
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -20,6 +23,20 @@ public interface DutchPayParticipantRepository extends JpaRepository<DutchPayPar
               and p.user_id = :userId
             """)
     Optional<DutchPayParticipantEntity> findParticipantForPaymentValidation(
+            @Param("sessionId") Long sessionId,
+            @Param("participantId") Long participantId,
+            @Param("userId") Long userId);
+
+    // [be] 영은 260526 1620 | 참여자별 결제 주문 생성/완료 처리 시 같은 참여자 row를 잠가 중복 병렬 결제를 막는다
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select p
+            from DutchPayParticipantEntity p
+            where p.participant_id = :participantId
+              and p.session.session_id = :sessionId
+              and p.user_id = :userId
+            """)
+    Optional<DutchPayParticipantEntity> findParticipantForPaymentUpdate(
             @Param("sessionId") Long sessionId,
             @Param("participantId") Long participantId,
             @Param("userId") Long userId);

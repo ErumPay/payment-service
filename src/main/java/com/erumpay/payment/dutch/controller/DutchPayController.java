@@ -20,6 +20,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultReque
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteLinkResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayMyPaymentResponse;
+import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantsConfirmRequest;
@@ -67,6 +68,16 @@ public class DutchPayController {
         log.info("/internal/v1/dutch-pay/sessions/{}/participants/validate-payment Controller", session_id);
 
         return ResponseEntity.ok(dutchPayService.validateParticipantPayment(session_id, request));
+    }
+
+    // [be] 영은 260526 1620 | core/PG 결제 완료 이벤트를 받아 더치페이 참여자 결제 상태를 반영하는 내부 API
+    @PostMapping("/internal/v1/dutch-pay/sessions/{session_id}/participants/payment-result")
+    public ResponseEntity<DutchPaySessionDetailResponse> applyParticipantPaymentResult(
+            @PathVariable Long session_id,
+            @Valid @RequestBody DutchPayParticipantPaymentResultRequest request) {
+        log.info("/internal/v1/dutch-pay/sessions/{}/participants/payment-result Controller", session_id);
+
+        return ResponseEntity.ok(dutchPayService.applyParticipantPaymentResult(session_id, request));
     }
 
     // [be] 영은 260523 1120 | 초대/알림/화면 복원 시 최신 더치페이 세션 상세를 조회하는 API
