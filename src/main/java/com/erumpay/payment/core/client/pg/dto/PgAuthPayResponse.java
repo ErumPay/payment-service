@@ -23,7 +23,7 @@ public class PgAuthPayResponse {
 
     private String txnType;
 
-    private String pgStatus;
+    private String status;
 
     private Long amount;
 

@@ -115,6 +115,15 @@ public class CoreEntity {
         this.updated_at = paidAt;
     }
 
+    // [be] 다윤 260527 실결제 실패 status 업데이트
+    public void failedStatusUpdatePayment(LocalDateTime failedAt) {
+        if (failedAt == null) {
+            throw new IllegalArgumentException("failedAt must not be null");
+        }
+        this.payment_status = PaymentStatus.FAILED;
+        this.updated_at = failedAt;
+    }
+
     // [be] 다윤 260526 QR 생성시 new entity 생성
     public static CoreEntity toEntity(
             String orderNo,
