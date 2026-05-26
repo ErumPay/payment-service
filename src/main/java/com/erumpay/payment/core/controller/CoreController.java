@@ -4,7 +4,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import com.erumpay.payment.core.client.auth.dto.AuthPinResponse;
 import com.erumpay.payment.core.domain.dto.PrepareRequest;
 import com.erumpay.payment.core.domain.dto.PrepareResponse;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;

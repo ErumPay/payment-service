@@ -51,12 +51,13 @@ public class CorePgPaymentService {
                         savedIdempotencyKey,
                         pgAuthRequest);
 
-                log.info("pgClientResponse : {}", pgResponse);
+                log.debug("pgClientResponse : {}", pgResponse);
 
                 if (pgResponse == null) {
                     throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
                 }
 
+                // [be] 다윤 260527 단일 카드 결제 요청만 강제
                 payment.paidStatusUpdatePayment(LocalDateTime.now());
 
                 EventEntity savedEvent = EventEntity.builder()

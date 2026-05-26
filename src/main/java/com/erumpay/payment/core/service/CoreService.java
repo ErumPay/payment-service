@@ -212,7 +212,7 @@ public class CoreService {
                 .paymentId(payment.getPaymentId())
                 .userId(payment.getUserId())
                 .paymentStatus(payment.getPayment_status().name())
-                .paymentType(payment.getPayment_type())
+                .paymentType(payment.getPayment_type().name())
                 .build());
     }
 
