@@ -21,12 +21,17 @@ public class DutchPaySseRedisSubscriber implements MessageListener {
     private final ObjectMapper objectMapper;
     private final DutchPaySseService dutchPaySseService;
 
-    // [be] 영은 260526 1020 | Redis 채널에서 받은 세션 변경 알림을 현재 인스턴스의 SSE 연결에 반영한다
+    // Applies Redis session-change messages to SSE connections on this instance.
     @Override
     public void onMessage(Message message, byte[] pattern) {
         try {
             String body = new String(message.getBody(), StandardCharsets.UTF_8);
             DutchPaySseRedisMessage event = objectMapper.readValue(body, DutchPaySseRedisMessage.class);
+            if (event.getSession_id() == null || event.getEvent_type() == null || event.getEvent_type().isBlank()) {
+                log.warn("DutchPay SSE Redis message ignored. invalid payload={}", body);
+                return;
+            }
+
             dutchPaySseService.sendLocalSessionUpdated(event.getSession_id(), event.getEvent_type());
         } catch (Exception e) {
             log.warn("DutchPay SSE Redis message handling failed. channel={}",
