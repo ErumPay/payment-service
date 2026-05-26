@@ -26,6 +26,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRe
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantsConfirmRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPaySessionDetailResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPaySplitMethodRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayTimeoutBatchResponse;
 import com.erumpay.payment.dutch.service.DutchPayService;
 import com.erumpay.payment.dutch.service.DutchPaySseService;
 
@@ -78,6 +79,13 @@ public class DutchPayController {
         log.info("/internal/v1/dutch-pay/sessions/{}/participants/payment-result Controller", session_id);
 
         return ResponseEntity.ok(dutchPayService.applyParticipantPaymentResult(session_id, request));
+    }
+
+    @PostMapping("/internal/v1/dutch-pay/timeout-batch")
+    public ResponseEntity<DutchPayTimeoutBatchResponse> handleTimeoutBatch() {
+        log.info("/internal/v1/dutch-pay/timeout-batch Controller");
+
+        return ResponseEntity.ok(dutchPayService.handleTimeoutBatch());
     }
 
     // [be] 영은 260523 1120 | 초대/알림/화면 복원 시 최신 더치페이 세션 상세를 조회하는 API

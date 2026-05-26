@@ -199,6 +199,23 @@ public class DutchPayParticipantEntity {
         this.updated_at = now;
     }
 
+    public void timeout(LocalDateTime now) {
+        validateNow(now);
+
+        if (this.status == ParticipantStatus.PAID
+                || this.status == ParticipantStatus.REJECTED
+                || this.status == ParticipantStatus.TIMEOUT
+                || this.status == ParticipantStatus.HOST_PAID) {
+            return;
+        }
+        if (this.status != ParticipantStatus.PENDING && this.status != ParticipantStatus.INVITED) {
+            throw new IllegalStateException("Only invited or pending participant can be timed out");
+        }
+
+        this.status = ParticipantStatus.TIMEOUT;
+        this.updated_at = now;
+    }
+
     // [be] 영은 260523 1120 | 상태 변경 시각이 누락되지 않도록 도메인 메서드 공통 검증을 수행한다
     private void validateNow(LocalDateTime now) {
         if (now == null) {

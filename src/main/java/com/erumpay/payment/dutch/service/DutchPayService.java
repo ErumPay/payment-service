@@ -2,9 +2,11 @@ package com.erumpay.payment.dutch.service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
@@ -39,6 +41,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRe
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantsConfirmRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPaySessionDetailResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPaySplitMethodRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayTimeoutBatchResponse;
 import com.erumpay.payment.dutch.domain.entity.DutchPayParticipantEntity;
 import com.erumpay.payment.dutch.domain.entity.DutchPayParticipantEntity.ParticipantStatus;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity;
@@ -56,6 +59,9 @@ public class DutchPayService {
     private static final DateTimeFormatter ORDER_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final int ORDER_RANDOM_DIGITS = 10;
     private static final long INVITE_TOKEN_TTL_MILLIS = 3L * 60L * 60L * 1000L;
+    private static final Duration WARNING_1_AFTER = Duration.ofMinutes(15);
+    private static final Duration WARNING_2_AFTER = Duration.ofMinutes(25);
+    private static final Duration TIMEOUT_AFTER = Duration.ofMinutes(30);
     private static final String INVITE_TOKEN_HMAC_ALGORITHM = "HmacSHA256";
     private static final String DEFAULT_INVITE_TOKEN_SECRET = "erumpay-local-dutch-invite-token-secret";
 
@@ -209,6 +215,64 @@ public class DutchPayService {
                 session.getStatus() == DutchPayStatus.COMPLETED
                         ? "SESSION_COMPLETED"
                         : "PARTICIPANT_PAYMENT_PAID");
+    }
+
+    @Transactional
+    public DutchPayTimeoutBatchResponse handleTimeoutBatch() {
+        LocalDateTime now = LocalDateTime.now();
+
+        List<DutchPayTimeoutBatchResponse.TimeoutHandledSession> timeoutResults = new ArrayList<>();
+        List<Long> failedSessionIds = new ArrayList<>();
+        List<DutchPaySessionEntity> timeoutTargets = dutchPaySessionRepository.findTimeoutTargetsForUpdate(
+                DutchPayStatus.IN_PROGRESS,
+                now.minus(TIMEOUT_AFTER));
+        for (DutchPaySessionEntity session : timeoutTargets) {
+            try {
+                timeoutResults.add(handleTimedOutSession(session, now));
+            } catch (RuntimeException e) {
+                failedSessionIds.add(session.getSession_id());
+                log.warn("DutchPay timeout handling failed. session_id={}", session.getSession_id(), e);
+            }
+        }
+
+        List<DutchPaySessionEntity> warning2Targets = dutchPaySessionRepository.findWarning2TargetsForUpdate(
+                DutchPayStatus.IN_PROGRESS,
+                now.minus(WARNING_2_AFTER));
+        int warning2Count = 0;
+        for (DutchPaySessionEntity session : warning2Targets) {
+            try {
+                session.markWarning2Sent(now);
+                publishSessionUpdated(session.getSession_id(), "TIMEOUT_WARNING_2");
+                warning2Count++;
+            } catch (RuntimeException e) {
+                failedSessionIds.add(session.getSession_id());
+                log.warn("DutchPay timeout warning2 failed. session_id={}", session.getSession_id(), e);
+            }
+        }
+
+        List<DutchPaySessionEntity> warning1Targets = dutchPaySessionRepository.findWarning1TargetsForUpdate(
+                DutchPayStatus.IN_PROGRESS,
+                now.minus(WARNING_1_AFTER));
+        int warning1Count = 0;
+        for (DutchPaySessionEntity session : warning1Targets) {
+            try {
+                session.markWarning1Sent(now);
+                publishSessionUpdated(session.getSession_id(), "TIMEOUT_WARNING_1");
+                warning1Count++;
+            } catch (RuntimeException e) {
+                failedSessionIds.add(session.getSession_id());
+                log.warn("DutchPay timeout warning1 failed. session_id={}", session.getSession_id(), e);
+            }
+        }
+
+        return DutchPayTimeoutBatchResponse.builder()
+                .warning_1_count(warning1Count)
+                .warning_2_count(warning2Count)
+                .timeout_handled_count(timeoutResults.size())
+                .failed_count(failedSessionIds.size())
+                .failed_session_ids(failedSessionIds)
+                .timeout_sessions(timeoutResults)
+                .build();
     }
 
     // [be] 영은 260523 1120 | 대표자/참여자가 알림 클릭 또는 화면 복원 시 최신 세션 상태를 조회한다
@@ -428,6 +492,44 @@ public class DutchPayService {
                 || request.getOrder_name().isBlank()) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
+    }
+
+    private DutchPayTimeoutBatchResponse.TimeoutHandledSession handleTimedOutSession(
+            DutchPaySessionEntity session,
+            LocalDateTime now) {
+        List<DutchPayParticipantEntity> participants = getParticipants(session.getSession_id());
+
+        long paidMemberAmount = participants.stream()
+                .filter(participant -> !participant.getUser_id().equals(session.getHost_user_id()))
+                .filter(participant -> participant.getStatus() == ParticipantStatus.PAID)
+                .map(DutchPayParticipantEntity::getAmount)
+                .filter(amount -> amount != null)
+                .reduce(0L, Long::sum);
+        long hostFinalAmount = session.getTotal_amount() - paidMemberAmount;
+        if (hostFinalAmount < 0) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        DutchPayParticipantEntity host = participants.stream()
+                .filter(participant -> participant.getUser_id().equals(session.getHost_user_id()))
+                .findFirst()
+                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+        host.assignAmount(hostFinalAmount, now);
+
+        participants.stream()
+                .filter(participant -> !participant.getUser_id().equals(session.getHost_user_id()))
+                .forEach(participant -> participant.timeout(now));
+
+        session.timeoutHandled(now);
+        publishSessionUpdated(session.getSession_id(), "TIMEOUT_HANDLED");
+
+        return DutchPayTimeoutBatchResponse.TimeoutHandledSession.builder()
+                .session_id(session.getSession_id())
+                .host_user_id(session.getHost_user_id())
+                .host_auth_payment_id_to_void(session.getHost_auth_payment_id())
+                .host_final_amount(hostFinalAmount)
+                .host_final_payment_required(hostFinalAmount > 0)
+                .build();
     }
 
     // [be] 영은 260523 1120 | 대표자 가승인 결과 콜백의 세션/결제 식별자를 검증한다
