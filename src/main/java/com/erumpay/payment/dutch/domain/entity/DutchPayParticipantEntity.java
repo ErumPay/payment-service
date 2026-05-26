@@ -202,7 +202,10 @@ public class DutchPayParticipantEntity {
     public void timeout(LocalDateTime now) {
         validateNow(now);
 
-        if (this.status == ParticipantStatus.PAID || this.status == ParticipantStatus.REJECTED) {
+        if (this.status == ParticipantStatus.PAID
+                || this.status == ParticipantStatus.REJECTED
+                || this.status == ParticipantStatus.TIMEOUT
+                || this.status == ParticipantStatus.HOST_PAID) {
             return;
         }
         if (this.status != ParticipantStatus.PENDING && this.status != ParticipantStatus.INVITED) {

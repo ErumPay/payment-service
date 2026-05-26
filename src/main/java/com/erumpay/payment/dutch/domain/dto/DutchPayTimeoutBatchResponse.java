@@ -16,6 +16,8 @@ public class DutchPayTimeoutBatchResponse {
     private int warning_1_count;
     private int warning_2_count;
     private int timeout_handled_count;
+    private int failed_count;
+    private List<Long> failed_session_ids;
     private List<TimeoutHandledSession> timeout_sessions;
 
     @Builder

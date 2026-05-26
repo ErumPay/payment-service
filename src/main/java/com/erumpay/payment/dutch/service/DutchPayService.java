@@ -222,33 +222,55 @@ public class DutchPayService {
         LocalDateTime now = LocalDateTime.now();
 
         List<DutchPayTimeoutBatchResponse.TimeoutHandledSession> timeoutResults = new ArrayList<>();
+        List<Long> failedSessionIds = new ArrayList<>();
         List<DutchPaySessionEntity> timeoutTargets = dutchPaySessionRepository.findTimeoutTargetsForUpdate(
                 DutchPayStatus.IN_PROGRESS,
                 now.minus(TIMEOUT_AFTER));
         for (DutchPaySessionEntity session : timeoutTargets) {
-            timeoutResults.add(handleTimedOutSession(session, now));
+            try {
+                timeoutResults.add(handleTimedOutSession(session, now));
+            } catch (RuntimeException e) {
+                failedSessionIds.add(session.getSession_id());
+                log.warn("DutchPay timeout handling failed. session_id={}", session.getSession_id(), e);
+            }
         }
 
         List<DutchPaySessionEntity> warning2Targets = dutchPaySessionRepository.findWarning2TargetsForUpdate(
                 DutchPayStatus.IN_PROGRESS,
                 now.minus(WARNING_2_AFTER));
+        int warning2Count = 0;
         for (DutchPaySessionEntity session : warning2Targets) {
-            session.markWarning2Sent(now);
-            publishSessionUpdated(session.getSession_id(), "TIMEOUT_WARNING_2");
+            try {
+                session.markWarning2Sent(now);
+                publishSessionUpdated(session.getSession_id(), "TIMEOUT_WARNING_2");
+                warning2Count++;
+            } catch (RuntimeException e) {
+                failedSessionIds.add(session.getSession_id());
+                log.warn("DutchPay timeout warning2 failed. session_id={}", session.getSession_id(), e);
+            }
         }
 
         List<DutchPaySessionEntity> warning1Targets = dutchPaySessionRepository.findWarning1TargetsForUpdate(
                 DutchPayStatus.IN_PROGRESS,
                 now.minus(WARNING_1_AFTER));
+        int warning1Count = 0;
         for (DutchPaySessionEntity session : warning1Targets) {
-            session.markWarning1Sent(now);
-            publishSessionUpdated(session.getSession_id(), "TIMEOUT_WARNING_1");
+            try {
+                session.markWarning1Sent(now);
+                publishSessionUpdated(session.getSession_id(), "TIMEOUT_WARNING_1");
+                warning1Count++;
+            } catch (RuntimeException e) {
+                failedSessionIds.add(session.getSession_id());
+                log.warn("DutchPay timeout warning1 failed. session_id={}", session.getSession_id(), e);
+            }
         }
 
         return DutchPayTimeoutBatchResponse.builder()
-                .warning_1_count(warning1Targets.size())
-                .warning_2_count(warning2Targets.size())
+                .warning_1_count(warning1Count)
+                .warning_2_count(warning2Count)
                 .timeout_handled_count(timeoutResults.size())
+                .failed_count(failedSessionIds.size())
+                .failed_session_ids(failedSessionIds)
                 .timeout_sessions(timeoutResults)
                 .build();
     }

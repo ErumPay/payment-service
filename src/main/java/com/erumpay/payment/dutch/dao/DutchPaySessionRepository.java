@@ -71,6 +71,7 @@ public interface DutchPaySessionRepository extends JpaRepository<DutchPaySession
             from DutchPaySessionEntity s
             where s.status = :status
               and s.timeout_at is null
+              and s.warning_1_sent_at is not null
               and s.warning_2_sent_at is null
               and s.created_at <= :warningThreshold
             order by s.created_at asc
