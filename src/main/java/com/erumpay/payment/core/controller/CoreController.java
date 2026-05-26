@@ -4,11 +4,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import com.erumpay.payment.core.client.auth.dto.AuthResponse;
-import com.erumpay.payment.core.domain.dto.CoreRequest;
-import com.erumpay.payment.core.domain.dto.CoreResponse;
+import com.erumpay.payment.core.client.auth.dto.AuthPinResponse;
+import com.erumpay.payment.core.domain.dto.PrepareRequest;
+import com.erumpay.payment.core.domain.dto.PrepareResponse;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
-import com.erumpay.payment.core.domain.dto.DutchMemberRequest;
+import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
+import com.erumpay.payment.core.domain.dto.DutchMemberPrepareRequest;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.core.service.CoreSseService;
@@ -36,10 +37,10 @@ public class CoreController {
 
     // [be] 다윤 260522 개인+대표자 결제 요청
     @PostMapping("/prepare")
-    public ResponseEntity<CoreResponse> prepare(
+    public ResponseEntity<PrepareResponse> prepare(
             @RequestHeader("X-User-Id") Long userId,
             @RequestHeader("Idempotency-Key") String idempotencyKey,
-            @Valid @RequestBody CoreRequest request) {
+            @Valid @RequestBody PrepareRequest request) {
 
         log.info("/payment/prepare Controller");
 
@@ -48,10 +49,10 @@ public class CoreController {
 
     // [be] 다윤 260522 참여자 결제 요청
     @PostMapping("/prepare-member")
-    public ResponseEntity<CoreResponse> prepareMember(
+    public ResponseEntity<PrepareResponse> prepareMember(
             @RequestHeader("X-User-Id") Long userId,
             @RequestHeader("Idempotency-Key") String idempotencyKey,
-            @Valid @RequestBody DutchMemberRequest request) {
+            @Valid @RequestBody DutchMemberPrepareRequest request) {
 
         log.info("/payment/prepare-member Controller");
 
@@ -73,7 +74,7 @@ public class CoreController {
 
     // [be] 다윤 260526 비밀번호 확인 및 실결제 요청
     @PostMapping("/request")
-    public ResponseEntity<AuthResponse> request(
+    public ResponseEntity<PinAndPayResponse> request(
             @RequestHeader("X-User-Id") Long userId,
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody PinAndPayRequest request) {

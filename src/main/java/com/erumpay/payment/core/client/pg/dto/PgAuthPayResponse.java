@@ -13,7 +13,7 @@ import lombok.ToString;
 @NoArgsConstructor
 @AllArgsConstructor
 @ToString
-public class PgAuthResponse {
+public class PgAuthPayResponse {
 
     private Long pgTxnId;
 

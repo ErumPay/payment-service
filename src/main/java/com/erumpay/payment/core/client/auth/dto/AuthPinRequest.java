@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-public class AuthRequest {
+public class AuthPinRequest {
     private Long userId;
     private String pin;
 }

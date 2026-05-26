@@ -3,8 +3,6 @@ package com.erumpay.payment.core.domain.entity;
 import java.time.LocalDateTime;
 import java.util.Locale;
 
-import com.erumpay.payment.core.client.pg.dto.PgAuthResponse;
-
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;

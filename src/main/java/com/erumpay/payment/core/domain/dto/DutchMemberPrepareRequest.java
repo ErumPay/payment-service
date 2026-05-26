@@ -14,18 +14,21 @@ import lombok.ToString;
 @ToString
 @AllArgsConstructor
 @NoArgsConstructor
-public class CoreRequest {
-
-    @NotNull
-    private Long paymentId;
+public class DutchMemberPrepareRequest {
 
     @NotNull
     @Positive
     private Long amount;
 
-    @NotBlank
-    private String paymentType;
+    @NotNull
+    @Positive
+    private Long sessionId;
 
-    private String dutchRole;
+    @NotBlank
+    private String orderName;
+
+    @NotNull
+    @Positive
+    private Long merchantId;
 
 }

@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-public class AuthResponse {
+public class AuthPinResponse {
 
     private boolean verified;
 

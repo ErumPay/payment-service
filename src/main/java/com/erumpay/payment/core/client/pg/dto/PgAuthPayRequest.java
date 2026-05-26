@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
-public class PgAuthRequest {
+public class PgAuthPayRequest {
 
     private Long payPaymentId;
 
