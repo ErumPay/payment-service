@@ -91,9 +91,6 @@ public class CoreService {
 
         // [be] 다윤 260526 대표자 세션아이디 요청
         if (paymentType == CoreEntity.PaymentType.DUTCH) {
-            if (!payment.getAmount().equals(request.getAmount())) {
-                throw new CustomException(ErrorCode.BAD_REQUEST);
-            }
 
             DutchPayCreateResponse dutchResponse = dutchPayService.createSession(
                     DutchPayCreateRequest.builder()
