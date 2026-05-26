@@ -47,6 +47,7 @@ public class DutchPaySessionEntity {
     private LocalDateTime updated_at;
     private LocalDateTime completed_at;
 
+    // [be] 영은 260523 1120 | core prepare 이후 CREATED 세션을 만들고 기본 배분 방식은 CUSTOM으로 둔다
     public static DutchPaySessionEntity created(
             String dutchOrderNo,
             Long hostAuthPaymentId,
@@ -62,7 +63,6 @@ public class DutchPaySessionEntity {
                 .merchant_id(merchantId)
                 .order_name(orderName)
                 .total_amount(totalAmount)
-                // [be] 영은 260520 2120 | 인원 확정 전 세션 생성 단계에서는 자율 입력을 기본 배분 방식으로 저장
                 .split_method(SplitMethod.CUSTOM)
                 .status(DutchPayStatus.CREATED)
                 .created_at(now)
@@ -70,8 +70,8 @@ public class DutchPaySessionEntity {
                 .build();
     }
 
+    // [be] 영은 260523 1120 | 대표자 가승인 결과에 따라 세션을 IN_PROGRESS 또는 FAILED로 전환한다
     public void applyHostAuthorizationResult(boolean authorized) {
-        // [be] 영은 260520 2046 | 대표자 가승인 결과는 CREATED 세션에서만 최초 상태 전이를 허용
         if (this.status != DutchPayStatus.CREATED) {
             throw new IllegalStateException("Host authorization result can only be applied to CREATED session");
         }
@@ -80,18 +80,21 @@ public class DutchPaySessionEntity {
         this.updated_at = LocalDateTime.now();
     }
 
+    // [be] 영은 260523 1120 | 대표자만 가능한 작업에서 요청 user_id를 검증한다
     public void requireHost(Long userId) {
         if (userId == null || !this.host_user_id.equals(userId)) {
             throw new IllegalStateException("Only host can update dutch pay session");
         }
     }
 
+    // [be] 영은 260523 1120 | 초대/배분/금액 입력은 IN_PROGRESS 세션에서만 허용한다
     public void requireInProgress() {
         if (this.status != DutchPayStatus.IN_PROGRESS) {
             throw new IllegalStateException("Dutch pay session is not in progress");
         }
     }
 
+    // [be] 영은 260523 1120 | 대표자가 배분 방식을 변경하면 세션 수정 시각을 함께 갱신한다
     public void changeSplitMethod(SplitMethod splitMethod, LocalDateTime now) {
         if (splitMethod == null || now == null) {
             throw new IllegalArgumentException("splitMethod and now must not be null");
@@ -99,6 +102,53 @@ public class DutchPaySessionEntity {
         requireInProgress();
 
         this.split_method = splitMethod;
+        this.updated_at = now;
+    }
+
+    // [be] 영은 260526 1620 | 모든 참여자 결제가 끝나면 세션을 완료 상태로 전환한다
+    public void complete(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        requireInProgress();
+
+        this.status = DutchPayStatus.COMPLETED;
+        this.completed_at = now;
+        this.updated_at = now;
+    }
+
+    public void markWarning1Sent(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        requireInProgress();
+
+        if (this.warning_1_sent_at == null) {
+            this.warning_1_sent_at = now;
+            this.updated_at = now;
+        }
+    }
+
+    public void markWarning2Sent(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        requireInProgress();
+
+        if (this.warning_2_sent_at == null) {
+            this.warning_2_sent_at = now;
+            this.updated_at = now;
+        }
+    }
+
+    public void timeoutHandled(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        requireInProgress();
+
+        this.status = DutchPayStatus.TIMEOUT_HANDLED;
+        this.timeout_at = now;
         this.updated_at = now;
     }
 

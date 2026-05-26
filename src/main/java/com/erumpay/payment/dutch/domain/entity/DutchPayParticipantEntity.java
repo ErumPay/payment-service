@@ -52,6 +52,7 @@ public class DutchPayParticipantEntity {
     private LocalDateTime updated_at;
     private LocalDateTime paid_at;
 
+    // [be] 영은 260523 1120 | 대표자가 초대한 참여자를 INVITED 상태로 생성한다
     public static DutchPayParticipantEntity invited(
             DutchPaySessionEntity session,
             Long userId,
@@ -74,6 +75,7 @@ public class DutchPayParticipantEntity {
                 .build();
     }
 
+    // [be] 영은 260523 1120 | 대표자는 세션 생성 시 즉시 PENDING 참여자로 포함한다
     public static DutchPayParticipantEntity host(
             DutchPaySessionEntity session,
             Long userId,
@@ -91,6 +93,7 @@ public class DutchPayParticipantEntity {
                 .build();
     }
 
+    // [be] 영은 260523 1120 | 대표자 인원 확정 후 초대 상태 참여자를 결제 대기 상태로 전환한다
     public void confirm(LocalDateTime now) {
         validateNow(now);
 
@@ -100,6 +103,7 @@ public class DutchPayParticipantEntity {
         }
     }
 
+    // [be] 영은 260523 1120 | 초대 거절 시 참여자 상태와 입력 금액을 초기화한다
     public void reject(LocalDateTime now) {
         validateNow(now);
 
@@ -112,6 +116,7 @@ public class DutchPayParticipantEntity {
         this.updated_at = now;
     }
 
+    // [be] 영은 260523 1120 | CUSTOM 배분에서 참여자가 본인 부담 금액을 직접 입력하거나 수정한다
     public void updateAmount(Long amount, LocalDateTime now) {
         validateNow(now);
 
@@ -126,6 +131,7 @@ public class DutchPayParticipantEntity {
         this.updated_at = now;
     }
 
+    // [be] 영은 260523 1120 | EQUAL 배분 또는 대표자 잔액 계산 결과를 참여자 금액으로 반영한다
     public void assignAmount(Long amount, LocalDateTime now) {
         validateNow(now);
 
@@ -140,6 +146,7 @@ public class DutchPayParticipantEntity {
         this.updated_at = now;
     }
 
+    // [be] 영은 260523 1120 | CUSTOM 전환 시 참여자가 다시 입력할 수 있도록 금액을 비운다
     public void clearAmount(LocalDateTime now) {
         validateNow(now);
 
@@ -149,6 +156,67 @@ public class DutchPayParticipantEntity {
         }
     }
 
+    // [be] 영은 260526 1620 | 참여자 결제 주문을 연결해 같은 참여자가 결제를 중복 생성하지 못하게 한다
+    public void startPayment(CoreEntity payment, LocalDateTime now) {
+        validateNow(now);
+
+        if (payment == null || payment.getPaymentId() == null) {
+            throw new IllegalArgumentException("payment must not be null");
+        }
+        if (this.status != ParticipantStatus.PENDING) {
+            throw new IllegalStateException("Only pending participant can start payment");
+        }
+        if (this.payment != null) {
+            throw new IllegalStateException("Participant payment is already assigned");
+        }
+        if (this.amount == null || !this.amount.equals(payment.getAmount())) {
+            throw new IllegalArgumentException("Participant amount and payment amount must match");
+        }
+
+        this.payment = payment;
+        this.updated_at = now;
+    }
+
+    // [be] 영은 260526 1620 | PG 승인 완료 이벤트가 도착하면 참여자 부담금 결제를 완료 상태로 전환한다
+    public void completePayment(Long paymentId, LocalDateTime now) {
+        validateNow(now);
+
+        if (paymentId == null) {
+            throw new IllegalArgumentException("paymentId must not be null");
+        }
+        if (this.status == ParticipantStatus.PAID) {
+            return;
+        }
+        if (this.status != ParticipantStatus.PENDING) {
+            throw new IllegalStateException("Only pending participant payment can be completed");
+        }
+        if (this.payment == null || !this.payment.getPaymentId().equals(paymentId)) {
+            throw new IllegalStateException("Participant payment does not match");
+        }
+
+        this.status = ParticipantStatus.PAID;
+        this.paid_at = now;
+        this.updated_at = now;
+    }
+
+    public void timeout(LocalDateTime now) {
+        validateNow(now);
+
+        if (this.status == ParticipantStatus.PAID
+                || this.status == ParticipantStatus.REJECTED
+                || this.status == ParticipantStatus.TIMEOUT
+                || this.status == ParticipantStatus.HOST_PAID) {
+            return;
+        }
+        if (this.status != ParticipantStatus.PENDING && this.status != ParticipantStatus.INVITED) {
+            throw new IllegalStateException("Only invited or pending participant can be timed out");
+        }
+
+        this.status = ParticipantStatus.TIMEOUT;
+        this.updated_at = now;
+    }
+
+    // [be] 영은 260523 1120 | 상태 변경 시각이 누락되지 않도록 도메인 메서드 공통 검증을 수행한다
     private void validateNow(LocalDateTime now) {
         if (now == null) {
             throw new IllegalArgumentException("now must not be null");
