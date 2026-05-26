@@ -61,7 +61,8 @@ public class CoreService {
             throw new CustomException(ErrorCode.FORBIDDEN);
         }
 
-        Optional<ResponseEntity<CoreResponse>> idempotentResponse = validateIdempotency(userId, normalizedIdempotencyKey);
+        Optional<ResponseEntity<CoreResponse>> idempotentResponse = validateIdempotency(userId,
+                normalizedIdempotencyKey);
         if (idempotentResponse.isPresent()) {
             return idempotentResponse.get();
         }
@@ -130,7 +131,8 @@ public class CoreService {
             DutchMemberRequest request) {
         String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
 
-        Optional<ResponseEntity<CoreResponse>> idempotentResponse = validateIdempotency(userId, normalizedIdempotencyKey);
+        Optional<ResponseEntity<CoreResponse>> idempotentResponse = validateIdempotency(userId,
+                normalizedIdempotencyKey);
         if (idempotentResponse.isPresent()) {
             return idempotentResponse.get();
         }
@@ -248,10 +250,11 @@ public class CoreService {
     }
 
     // [be] 다윤 260526 실결제 요청
-    public ResponseEntity<CoreResponse> request(Long userId, PayCreateRequest request) {
+    public ResponseEntity<CoreResponse> request(Long userId, String idempotencyKey, PayCreateRequest request) {
 
         log.info("/payment/request Service");
         log.debug("payCreateRequest : {} ", request);
+        String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
 
         CoreEntity payment = coreRepository.findById(request.getPaymentId())
                 .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
@@ -259,6 +262,12 @@ public class CoreService {
         if (payment.getUserId() == null || !payment.getUserId().equals(userId)) {
             throw new CustomException(ErrorCode.FORBIDDEN);
         }
+
+        String savedIdempotencyKey = payment.getIdempotencyKey();
+        if (savedIdempotencyKey == null || !savedIdempotencyKey.equals(normalizedIdempotencyKey)) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
         validateRequestStatus(payment.getPayment_status());
         if (!payment.getAmount().equals(request.getTotalAmount())) {
             throw new CustomException(ErrorCode.AMOUNT_MISMATCH);

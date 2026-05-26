@@ -87,11 +87,12 @@ public class CoreController {
     @PostMapping("/request")
     public ResponseEntity<CoreResponse> request(
             @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @RequestBody @Valid PayCreateRequest request) {
 
         log.info("/payment/request controller");
 
-        return coreService.request(userId, request);
+        return coreService.request(userId, idempotencyKey, request);
     }
 
 }
