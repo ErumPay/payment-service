@@ -1,10 +1,10 @@
 package com.erumpay.payment.dutch.service;
 
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
@@ -18,6 +18,8 @@ import javax.crypto.spec.SecretKeySpec;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -29,6 +31,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteLinkResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayMyPaymentResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantsConfirmRequest;
@@ -56,14 +59,15 @@ public class DutchPayService {
 
     private final DutchPaySessionRepository dutchPaySessionRepository;
     private final DutchPayParticipantRepository dutchPayParticipantRepository;
+    private final DutchPaySseService dutchPaySseService;
 
+    // [be] 영은 260523 1120 | core에서 생성한 대표자 payment_id를 받아 더치페이 세션과 대표자 참여자 row를 만든다
     @Transactional
     public DutchPayCreateResponse createSession(DutchPayCreateRequest request) {
         log.info("/internal/v1/dutch-pay/sessions Service");
         validateCreateRequest(request);
 
         LocalDateTime now = LocalDateTime.now();
-        // [be] 영은 260520 1530 | core prepare가 만든 대표자 payment_id를 받아 더치 세션만 생성
         DutchPaySessionEntity session = DutchPaySessionEntity.created(
                 generateUniqueDutchOrderNo(now),
                 request.getHost_payment_id(),
@@ -78,6 +82,7 @@ public class DutchPayService {
         return DutchPayCreateResponse.fromEntity(savedSession, "CREATED");
     }
 
+    // [be] 영은 260523 1120 | 대표자 가승인 성공/실패 결과를 세션 상태에 반영하고 화면 구독자에게 공유한다
     @Transactional
     public DutchPayCreateResponse applyHostAuthorizationResult(
             Long sessionId,
@@ -91,12 +96,13 @@ public class DutchPayService {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
 
-        // [be] 영은 260520 1530 | 대표자 가승인 결과만 반영하고 payment_orders 상태 변경은 core가 담당
         session.applyHostAuthorizationResult("AUTHORIZED".equalsIgnoreCase(request.getStatus()));
+        publishSessionUpdated(sessionId, "HOST_AUTHORIZATION_UPDATED");
 
         return DutchPayCreateResponse.fromEntity(session, request.getStatus());
     }
 
+    // [be] 영은 260523 1120 | core가 참여자 결제 생성 전 dutch 세션 상태와 참여자 부담 금액을 검증한다
     @Transactional(readOnly = true)
     public DutchPayParticipantPaymentValidateResponse validateParticipantPayment(
             Long sessionId,
@@ -106,7 +112,6 @@ public class DutchPayService {
 
         DutchPaySessionEntity session = dutchPaySessionRepository.findById(sessionId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
-        // [be] 영은 260520 2039 | 참여자 결제 prepare 전 더치 세션이 결제 가능한 상태인지 먼저 검증
         if (session.getStatus() != DutchPayStatus.IN_PROGRESS) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
@@ -117,7 +122,6 @@ public class DutchPayService {
                         request.getParticipant_id(),
                         request.getUser_id())
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
-        // [be] 영은 260520 2039 | payment_orders 생성은 core가 담당하므로 더치는 참여자/금액/중복 여부만 검증
         if (participant.getStatus() != ParticipantStatus.PENDING
                 || participant.getPayment() != null
                 || participant.getAmount() == null
@@ -133,6 +137,7 @@ public class DutchPayService {
                 participant.getStatus().name());
     }
 
+    // [be] 영은 260523 1120 | 대표자/참여자가 알림 클릭 또는 화면 복원 시 최신 세션 상태를 조회한다
     @Transactional(readOnly = true)
     public DutchPaySessionDetailResponse getSession(Long userId, Long sessionId) {
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
@@ -142,6 +147,22 @@ public class DutchPayService {
         return DutchPaySessionDetailResponse.fromEntity(session, participants);
     }
 
+    // [be] 영은 260523 1120 | 참여자가 결제 화면에 진입할 때 본인 participant_id와 부담 금액을 조회한다
+    @Transactional(readOnly = true)
+    public DutchPayMyPaymentResponse getMyPayment(Long userId, Long sessionId) {
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
+        ensureSessionMember(session, participants, userId);
+
+        DutchPayParticipantEntity participant = participants.stream()
+                .filter(item -> item.getUser_id().equals(userId))
+                .findFirst()
+                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+
+        return DutchPayMyPaymentResponse.fromEntity(session, participant);
+    }
+
+    // [be] 영은 260523 1120 | 홈 화면 진행 중 더치페이 목록 조회에 사용한다
     @Transactional(readOnly = true)
     public List<DutchPaySessionDetailResponse> getActiveSessions(Long userId) {
         if (userId == null) {
@@ -157,6 +178,7 @@ public class DutchPayService {
                 .toList();
     }
 
+    // [be] 영은 260523 1120 | 대표자가 앱 친구를 초대하면 참여자 row를 INVITED 상태로 추가한다
     @Transactional
     public DutchPaySessionDetailResponse inviteAppFriends(
             Long hostUserId,
@@ -180,9 +202,10 @@ public class DutchPayService {
                     DutchPayParticipantEntity.invited(session, inviteeUserId, null, now));
         }
 
-        return toDetailResponse(sessionId);
+        return publishAndReturn(sessionId, "PARTICIPANTS_INVITED");
     }
 
+    // [be] 영은 260523 1120 | 앱 밖 공유용 초대 링크에 session_id를 서명 토큰으로 감싸서 발급한다
     @Transactional(readOnly = true)
     public DutchPayInviteLinkResponse createInviteLink(Long hostUserId, Long sessionId) {
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
@@ -197,6 +220,7 @@ public class DutchPayService {
                 .build();
     }
 
+    // [be] 영은 260523 1120 | 링크 수락 시 토큰을 검증하고 참여자를 INVITED 상태로 추가한다
     @Transactional
     public DutchPaySessionDetailResponse acceptInviteLink(Long userId, String inviteToken) {
         if (userId == null || inviteToken == null || inviteToken.isBlank()) {
@@ -215,9 +239,10 @@ public class DutchPayService {
         dutchPayParticipantRepository.save(
                 DutchPayParticipantEntity.invited(session, userId, null, LocalDateTime.now()));
 
-        return toDetailResponse(sessionId);
+        return publishAndReturn(sessionId, "INVITE_LINK_ACCEPTED");
     }
 
+    // [be] 영은 260523 1120 | 참여자가 초대를 거절하면 REJECTED로 바꾸고 CUSTOM 금액은 다시 계산한다
     @Transactional
     public DutchPaySessionDetailResponse rejectInvite(Long userId, Long sessionId) {
         if (userId == null || sessionId == null) {
@@ -239,9 +264,10 @@ public class DutchPayService {
             recalculateHostCustomAmount(session, getParticipants(sessionId), LocalDateTime.now());
         }
 
-        return toDetailResponse(sessionId);
+        return publishAndReturn(sessionId, "INVITE_REJECTED");
     }
 
+    // [be] 영은 260523 1120 | 대표자가 인원을 확정하면 INVITED 참여자를 PENDING으로 전환한다
     @Transactional
     public DutchPaySessionDetailResponse confirmParticipants(
             Long hostUserId,
@@ -264,9 +290,10 @@ public class DutchPayService {
             applySplitMethod(session, participants, now);
         }
 
-        return DutchPaySessionDetailResponse.fromEntity(session, participants);
+        return publishAndReturn(sessionId, "PARTICIPANTS_CONFIRMED");
     }
 
+    // [be] 영은 260523 1120 | EQUAL은 즉시 균등 배분하고 CUSTOM은 대표자에게 전체 금액을 둔다
     @Transactional
     public DutchPaySessionDetailResponse updateSplitMethod(
             Long hostUserId,
@@ -285,9 +312,10 @@ public class DutchPayService {
         session.changeSplitMethod(splitMethod, now);
         applySplitMethod(session, participants, now);
 
-        return DutchPaySessionDetailResponse.fromEntity(session, participants);
+        return publishAndReturn(sessionId, "SPLIT_METHOD_UPDATED");
     }
 
+    // [be] 영은 260523 1120 | CUSTOM에서 참여자 금액을 저장하고 대표자 잔여 부담금을 재계산한다
     @Transactional
     public DutchPaySessionDetailResponse updateMyAmount(
             Long userId,
@@ -311,9 +339,10 @@ public class DutchPayService {
         List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
         recalculateHostCustomAmount(session, participants, LocalDateTime.now());
 
-        return DutchPaySessionDetailResponse.fromEntity(session, participants);
+        return publishAndReturn(sessionId, "AMOUNT_UPDATED");
     }
 
+    // [be] 영은 260523 1120 | 내부 세션 생성 요청의 필수값과 금액 유효성을 검증한다
     private void validateCreateRequest(DutchPayCreateRequest request) {
         if (request == null
                 || request.getHost_payment_id() == null
@@ -327,6 +356,7 @@ public class DutchPayService {
         }
     }
 
+    // [be] 영은 260523 1120 | 대표자 가승인 결과 콜백의 세션/결제 식별자를 검증한다
     private void validateHostAuthorizationResultRequest(
             Long sessionId,
             DutchPayHostAuthorizationResultRequest request) {
@@ -339,6 +369,7 @@ public class DutchPayService {
         }
     }
 
+    // [be] 영은 260523 1120 | 참여자 결제 검증 요청의 참여자/회원/금액 식별자를 검증한다
     private void validateParticipantPaymentRequest(
             Long sessionId,
             DutchPayParticipantPaymentValidateRequest request) {
@@ -352,6 +383,7 @@ public class DutchPayService {
         }
     }
 
+    // [be] 영은 260523 1120 | 앱 친구 초대 요청의 대표자/세션/초대 대상 목록을 검증한다
     private void validateInviteRequest(
             Long hostUserId,
             Long sessionId,
@@ -365,6 +397,7 @@ public class DutchPayService {
         }
     }
 
+    // [be] 영은 260523 1120 | 세션 조회 공통 처리
     private DutchPaySessionEntity getSessionOrThrow(Long sessionId) {
         if (sessionId == null) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
@@ -374,15 +407,48 @@ public class DutchPayService {
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
     }
 
+    // [be] 영은 260523 1120 | 화면 응답과 배분 계산에 필요한 참여자 목록을 participant_id 순서로 조회한다
     private List<DutchPayParticipantEntity> getParticipants(Long sessionId) {
         return dutchPayParticipantRepository.findBySessionIdOrderByParticipantId(sessionId);
     }
 
+    // [be] 영은 260523 1120 | 현재 세션과 참여자 목록을 화면 응답 DTO로 변환한다
     private DutchPaySessionDetailResponse toDetailResponse(Long sessionId) {
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
         return DutchPaySessionDetailResponse.fromEntity(session, getParticipants(sessionId));
     }
 
+    // [be] 영은 260523 1120 | 상태 변경 API 응답과 동일한 데이터를 SSE 이벤트로도 발행한다
+    private DutchPaySessionDetailResponse publishAndReturn(Long sessionId, String eventType) {
+        DutchPaySessionDetailResponse response = toDetailResponse(sessionId);
+        publishAfterCommit(sessionId, eventType, response);
+        return response;
+    }
+
+    // [be] 영은 260523 1120 | 응답 DTO가 필요 없는 내부 상태 변경에서도 SSE 이벤트를 예약한다
+    private void publishSessionUpdated(Long sessionId, String eventType) {
+        publishAfterCommit(sessionId, eventType, toDetailResponse(sessionId));
+    }
+
+    // [be] 영은 260523 1120 | DB 커밋 성공 이후에만 SSE를 발행해 화면과 저장 상태 불일치를 막는다
+    private void publishAfterCommit(
+            Long sessionId,
+            String eventType,
+            DutchPaySessionDetailResponse response) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            dutchPaySseService.publishSessionUpdated(sessionId, eventType, response);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                dutchPaySseService.publishSessionUpdated(sessionId, eventType, response);
+            }
+        });
+    }
+
+    // [be] 영은 260523 1120 | 대표자만 수행 가능한 IN_PROGRESS 세션 작업인지 확인한다
     private void ensureHostInProgress(DutchPaySessionEntity session, Long hostUserId) {
         try {
             session.requireHost(hostUserId);
@@ -392,6 +458,7 @@ public class DutchPayService {
         }
     }
 
+    // [be] 영은 260523 1120 | 초대/금액 입력 등 참여자 작업이 가능한 진행 중 세션인지 확인한다
     private void ensureInProgress(DutchPaySessionEntity session) {
         try {
             session.requireInProgress();
@@ -400,6 +467,7 @@ public class DutchPayService {
         }
     }
 
+    // [be] 영은 260523 1120 | 세션 상세/SSE/내 결제 조회자가 대표자 또는 참여자인지 확인한다
     private void ensureSessionMember(
             DutchPaySessionEntity session,
             List<DutchPayParticipantEntity> participants,
@@ -418,6 +486,7 @@ public class DutchPayService {
         }
     }
 
+    // [be] 영은 260523 1120 | 문자열 배분 방식을 enum으로 변환한다
     private SplitMethod parseSplitMethod(String splitMethod) {
         try {
             return SplitMethod.valueOf(splitMethod.trim().toUpperCase(Locale.ROOT));
@@ -426,11 +495,11 @@ public class DutchPayService {
         }
     }
 
+    // [be] 영은 260523 1120 | 선택한 배분 방식에 따라 참여자 금액을 초기화하거나 계산한다
     private void applySplitMethod(
             DutchPaySessionEntity session,
             List<DutchPayParticipantEntity> participants,
             LocalDateTime now) {
-        // [be] 영은 260521 1621 | CUSTOM은 대표자에게 총액을 우선 배정하고 참여자 입력분만큼 차감
         if (session.getSplit_method() == SplitMethod.EQUAL) {
             distributeEqualAmount(session, participants, now);
             return;
@@ -446,6 +515,7 @@ public class DutchPayService {
         });
     }
 
+    // [be] 영은 260523 1120 | PENDING 참여자 기준으로 균등 배분하고 나머지는 대표자에게 배정한다
     private void distributeEqualAmount(
             DutchPaySessionEntity session,
             List<DutchPayParticipantEntity> participants,
@@ -468,6 +538,7 @@ public class DutchPayService {
         }
     }
 
+    // [be] 영은 260523 1120 | CUSTOM에서 참여자 입력 금액을 제외한 잔액을 대표자 부담금으로 반영한다
     private void recalculateHostCustomAmount(
             DutchPaySessionEntity session,
             List<DutchPayParticipantEntity> participants,
@@ -490,6 +561,7 @@ public class DutchPayService {
         host.assignAmount(session.getTotal_amount() - memberAmountSum, now);
     }
 
+    // [be] 영은 260523 1120 | 초대 링크 토큰의 형식, 서명, 만료 시간을 검증하고 session_id를 추출한다
     private Long parseSessionIdFromInviteToken(String inviteToken) {
         try {
             String[] tokenParts = inviteToken.split("\\.");
@@ -521,6 +593,7 @@ public class DutchPayService {
         }
     }
 
+    // [be] 영은 260523 1120 | session_id와 만료 시각을 담은 서명 토큰을 생성한다
     private String createSignedInviteToken(Long sessionId) {
         String payload = sessionId
                 + ":"
@@ -534,6 +607,7 @@ public class DutchPayService {
         return encodedPayload + "." + signInviteTokenPayload(payload);
     }
 
+    // [be] 영은 260523 1120 | 초대 링크 위변조 방지를 위해 HMAC-SHA256 서명을 만든다
     private String signInviteTokenPayload(String payload) {
         try {
             Mac mac = Mac.getInstance(INVITE_TOKEN_HMAC_ALGORITHM);
@@ -548,6 +622,7 @@ public class DutchPayService {
         }
     }
 
+    // [be] 영은 260523 1120 | 로컬 개발은 기본 secret을 쓰고 운영 환경은 환경변수로 교체한다
     private String resolveInviteTokenSecret() {
         String secret = System.getenv("DUTCH_INVITE_TOKEN_SECRET");
         if (secret == null || secret.isBlank()) {
@@ -557,6 +632,7 @@ public class DutchPayService {
         return secret;
     }
 
+    // [be] 영은 260523 1120 | 사용자/운영자가 식별할 더치페이 주문번호를 중복 없이 생성한다
     private String generateUniqueDutchOrderNo(LocalDateTime now) {
         String datePart = now.format(ORDER_DATE_FORMAT);
         String prefix = "DUTCH" + datePart + "EP";

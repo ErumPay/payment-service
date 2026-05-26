@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.erumpay.payment.dutch.domain.dto.DutchPayAmountRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateRequest;
@@ -18,12 +19,14 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteLinkResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayMyPaymentResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantsConfirmRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPaySessionDetailResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPaySplitMethodRequest;
 import com.erumpay.payment.dutch.service.DutchPayService;
+import com.erumpay.payment.dutch.service.DutchPaySseService;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -36,7 +39,9 @@ import lombok.extern.slf4j.Slf4j;
 public class DutchPayController {
 
     private final DutchPayService dutchPayService;
+    private final DutchPaySseService dutchPaySseService;
 
+    // [be] 영은 260523 1120 | core가 DUTCH/HOST prepare 처리 중 호출하는 내부 세션 생성 API
     @PostMapping("/internal/v1/dutch-pay/sessions")
     public ResponseEntity<DutchPayCreateResponse> createSession(@RequestBody DutchPayCreateRequest request) {
         log.info("/internal/v1/dutch-pay/sessions Controller");
@@ -44,6 +49,7 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.createSession(request));
     }
 
+    // [be] 영은 260523 1120 | core가 대표자 가승인 결과를 dutch에 전달하는 내부 콜백 API
     @PostMapping("/internal/v1/dutch-pay/sessions/{session_id}/host-authorization-result")
     public ResponseEntity<DutchPayCreateResponse> applyHostAuthorizationResult(
             @PathVariable Long session_id,
@@ -53,6 +59,7 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.applyHostAuthorizationResult(session_id, request));
     }
 
+    // [be] 영은 260523 1120 | core가 DUTCH/MEMBER 결제 생성 전 참여자와 부담 금액을 검증하는 내부 API
     @PostMapping("/internal/v1/dutch-pay/sessions/{session_id}/participants/validate-payment")
     public ResponseEntity<DutchPayParticipantPaymentValidateResponse> validateParticipantPayment(
             @PathVariable Long session_id,
@@ -62,6 +69,7 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.validateParticipantPayment(session_id, request));
     }
 
+    // [be] 영은 260523 1120 | 초대/알림/화면 복원 시 최신 더치페이 세션 상세를 조회하는 API
     @GetMapping("/api/v1/dutch-pay/sessions/{session_id}")
     public ResponseEntity<DutchPaySessionDetailResponse> getSession(
             @RequestHeader("X-User-Id") Long userId,
@@ -71,6 +79,27 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.getSession(userId, session_id));
     }
 
+    // [be] 영은 260523 1120 | 알림 클릭 후 참여자가 결제 진입 화면에 표시할 본인 결제 정보를 조회하는 API
+    @GetMapping("/api/v1/dutch-pay/sessions/{session_id}/my-payment")
+    public ResponseEntity<DutchPayMyPaymentResponse> getMyPayment(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable Long session_id) {
+        log.info("/api/v1/dutch-pay/sessions/{}/my-payment Controller", session_id);
+
+        return ResponseEntity.ok(dutchPayService.getMyPayment(userId, session_id));
+    }
+
+    // [be] 영은 260523 1120 | 참여자 금액/상태 변경을 실시간으로 받는 단일 인스턴스 SSE API
+    @GetMapping("/api/v1/dutch-pay/sessions/{session_id}/stream")
+    public SseEmitter streamSession(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable Long session_id) {
+        log.info("/api/v1/dutch-pay/sessions/{}/stream Controller", session_id);
+
+        return dutchPaySseService.subscribe(session_id, userId);
+    }
+
+    // [be] 영은 260523 1120 | 홈 화면 이어하기에 표시할 진행 중 더치페이 세션 목록 조회 API
     @GetMapping("/api/v1/dutch-pay/sessions/active")
     public ResponseEntity<List<DutchPaySessionDetailResponse>> getActiveSessions(
             @RequestHeader("X-User-Id") Long userId) {
@@ -79,6 +108,7 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.getActiveSessions(userId));
     }
 
+    // [be] 영은 260523 1120 | 대표자가 앱 안 친구를 더치페이 그룹에 직접 초대하는 API
     @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/invites")
     public ResponseEntity<DutchPaySessionDetailResponse> inviteAppFriends(
             @RequestHeader("X-User-Id") Long userId,
@@ -89,6 +119,7 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.inviteAppFriends(userId, session_id, request));
     }
 
+    // [be] 영은 260523 1120 | 앱 밖 공유를 위한 서명된 초대 링크를 생성하는 API
     @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/invite-links")
     public ResponseEntity<DutchPayInviteLinkResponse> createInviteLink(
             @RequestHeader("X-User-Id") Long userId,
@@ -98,6 +129,7 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.createInviteLink(userId, session_id));
     }
 
+    // [be] 영은 260523 1120 | 초대 링크를 통해 더치페이 그룹에 참여하는 API
     @PostMapping("/api/v1/dutch-pay/invite-links/{invite_token}/accept")
     public ResponseEntity<DutchPaySessionDetailResponse> acceptInviteLink(
             @RequestHeader("X-User-Id") Long userId,
@@ -107,6 +139,7 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.acceptInviteLink(userId, invite_token));
     }
 
+    // [be] 영은 260523 1120 | 참여자가 초대를 거절하고 CUSTOM이면 대표자 부담금을 다시 계산하는 API
     @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/reject")
     public ResponseEntity<DutchPaySessionDetailResponse> rejectInvite(
             @RequestHeader("X-User-Id") Long userId,
@@ -116,6 +149,7 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.rejectInvite(userId, session_id));
     }
 
+    // [be] 영은 260523 1120 | 대표자가 참여 인원을 확정하고 금액 배분 단계로 전환하는 API
     @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/participants/confirm")
     public ResponseEntity<DutchPaySessionDetailResponse> confirmParticipants(
             @RequestHeader("X-User-Id") Long userId,
@@ -126,6 +160,7 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.confirmParticipants(userId, session_id, request));
     }
 
+    // [be] 영은 260523 1120 | 대표자가 EQUAL/CUSTOM 배분 방식을 변경하는 API
     @PatchMapping("/api/v1/dutch-pay/sessions/{session_id}/split-method")
     public ResponseEntity<DutchPaySessionDetailResponse> updateSplitMethod(
             @RequestHeader("X-User-Id") Long userId,
@@ -136,6 +171,7 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.updateSplitMethod(userId, session_id, request));
     }
 
+    // [be] 영은 260523 1120 | CUSTOM 배분에서 참여자가 본인 부담 금액을 입력하거나 수정하는 API
     @PatchMapping("/api/v1/dutch-pay/sessions/{session_id}/my-amount")
     public ResponseEntity<DutchPaySessionDetailResponse> updateMyAmount(
             @RequestHeader("X-User-Id") Long userId,
