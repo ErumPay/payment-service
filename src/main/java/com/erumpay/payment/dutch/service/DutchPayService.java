@@ -180,7 +180,7 @@ public class DutchPayService {
             DutchPayParticipantPaymentResultRequest request) {
         validateParticipantPaymentResultRequest(sessionId, request);
 
-        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        DutchPaySessionEntity session = getSessionForPaymentResultUpdate(sessionId);
         ensureInProgress(session);
 
         DutchPayParticipantEntity participant = dutchPayParticipantRepository
@@ -495,6 +495,16 @@ public class DutchPayService {
         }
 
         return dutchPaySessionRepository.findById(sessionId)
+                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+    }
+
+    // Serializes participant payment callbacks per session so the final callback cannot miss session completion.
+    private DutchPaySessionEntity getSessionForPaymentResultUpdate(Long sessionId) {
+        if (sessionId == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        return dutchPaySessionRepository.findByIdForUpdate(sessionId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
     }
 

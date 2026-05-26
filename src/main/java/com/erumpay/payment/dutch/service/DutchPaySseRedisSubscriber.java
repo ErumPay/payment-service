@@ -28,7 +28,8 @@ public class DutchPaySseRedisSubscriber implements MessageListener {
             String body = new String(message.getBody(), StandardCharsets.UTF_8);
             DutchPaySseRedisMessage event = objectMapper.readValue(body, DutchPaySseRedisMessage.class);
             if (event.getSession_id() == null || event.getEvent_type() == null || event.getEvent_type().isBlank()) {
-                log.warn("DutchPay SSE Redis message ignored. invalid payload={}", body);
+                log.warn("DutchPay SSE Redis message ignored. session_id={}, event_type={}",
+                        event.getSession_id(), event.getEvent_type());
                 return;
             }
 
