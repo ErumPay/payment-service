@@ -8,6 +8,7 @@ import com.erumpay.payment.core.domain.dto.PrepareRequest;
 import com.erumpay.payment.core.domain.dto.PrepareResponse;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
+import com.erumpay.payment.core.domain.dto.CanceledResponse;
 import com.erumpay.payment.core.domain.dto.DutchMemberPrepareRequest;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -81,6 +82,18 @@ public class CoreController {
         log.info("/payment/request controller");
 
         return coreService.request(userId, idempotencyKey, request);
+    }
+
+    // [be] 다윤 260527 결제 취소 요청
+    @PostMapping("/{paymentId}/cancel")
+    public ResponseEntity<CanceledResponse> cancel(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
+            @PathVariable("paymentId") Long paymentId) {
+
+        log.info("/payment/cancel Controller");
+
+        return ResponseEntity.ok(coreService.cancel(userId, idempotencyKey, paymentId));
     }
 
 }

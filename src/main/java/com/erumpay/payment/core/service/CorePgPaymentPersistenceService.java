@@ -41,7 +41,7 @@ public class CorePgPaymentPersistenceService {
                 .actor_type(EventEntity.ActorType.SYSTEM)
                 .created_at(pgResponse != null && pgResponse.getProcessedAt() != null
                         ? pgResponse.getProcessedAt()
-                        : LocalDate.now())
+                        : LocalDateTime.now())
                 .build();
 
         eventRepository.save(savedEvent);

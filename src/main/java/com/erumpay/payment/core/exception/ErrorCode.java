@@ -16,6 +16,9 @@ public enum ErrorCode {
     AMOUNT_MISMATCH(HttpStatus.BAD_REQUEST, "잘못된 금액 요청입니다."),
     DUPLICATED_REQUEST(HttpStatus.BAD_REQUEST, "중복된 요청입니다."),
     REQUEST_IN_PROGRESS(HttpStatus.CONFLICT, "요청 처리 중입니다."),
+    CANCELED_INVALID(HttpStatus.BAD_REQUEST, "취소 불가능한 결제건입니다."),
+    CANCELED_CARD_INVALID(HttpStatus.BAD_REQUEST, "취소 가능한 카드가 없습니다."),
+    CANCELED_PG_REJECTED(HttpStatus.BAD_REQUEST, "취소가 거절되었습니다."),
 
     // 403
     FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),

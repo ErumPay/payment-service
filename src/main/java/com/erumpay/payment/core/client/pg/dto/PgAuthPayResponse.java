@@ -1,6 +1,6 @@
 package com.erumpay.payment.core.client.pg.dto;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -37,8 +37,8 @@ public class PgAuthPayResponse {
 
     private String failureMessage;
 
-    private LocalDate approvedAt;
+    private LocalDateTime approvedAt;
 
-    private LocalDate processedAt;
+    private LocalDateTime processedAt;
 
 }
