@@ -64,6 +64,8 @@ public class CoreEntity {
     private Long dutch_session_id;
     @Enumerated(EnumType.STRING)
     private DutchRole dutch_role;
+    @Enumerated(EnumType.STRING)
+    private PaymentIntent payment_intent;
 
     // 원격
     private Long remote_request_id;
@@ -97,11 +99,27 @@ public class CoreEntity {
     }
 
     // [be] 다윤 260526 실결제 status 업데이트
-    public void pgRequestUpdateStatusPayment(LocalDateTime updatedAt) {
+    public void pgPendingStatusUpdatePayment(LocalDateTime updatedAt) {
         if (updatedAt == null) {
             throw new IllegalArgumentException("updatedAt must not be null");
         }
         this.payment_status = PaymentStatus.PG_PENDING;
+        this.updated_at = updatedAt;
+    }
+
+    public void payPendingStatusUpdatePayment(LocalDateTime updatedAt) {
+        if (updatedAt == null) {
+            throw new IllegalArgumentException("updatedAt must not be null");
+        }
+        this.payment_status = PaymentStatus.PAY_PENDING;
+        this.updated_at = updatedAt;
+    }
+
+    public void updatePaymentIntent(PaymentIntent paymentIntent, LocalDateTime updatedAt) {
+        if (paymentIntent == null || updatedAt == null) {
+            throw new IllegalArgumentException("paymentIntent and updatedAt must not be null");
+        }
+        this.payment_intent = paymentIntent;
         this.updated_at = updatedAt;
     }
 
@@ -240,6 +258,12 @@ public class CoreEntity {
     public enum DutchRole {
         HOST,
         MEMBER
+    }
+
+    public enum PaymentIntent {
+        DUTCH_HOST_AUTH_ONLY_PAY,
+        DUTCH_HOST_PAY,
+        DUTCH_MEMBER_PAY
     }
 
     public enum FailCode {

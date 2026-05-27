@@ -1,17 +1,12 @@
 package com.erumpay.payment.core.service;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-
 import org.springframework.stereotype.Service;
 
 import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
-import com.erumpay.payment.core.dao.EventRepository;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
-import com.erumpay.payment.core.domain.entity.EventEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 
@@ -29,7 +24,6 @@ public class CorePgPaymentService {
     private static final String PG_STATUS_REJECTED = "REJECTED";
 
     private final PgClient pgClient;
-    private final EventRepository eventRepository;
     private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
 
     // [be] 다윤 260526 pg-payment-service 실결제 요청
@@ -40,22 +34,21 @@ public class CorePgPaymentService {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
 
-        boolean isDutchHost = payment.getPayment_type() == CoreEntity.PaymentType.DUTCH
-                && payment.getDutch_role() == CoreEntity.DutchRole.HOST;
+        boolean useAuthOnly = shouldUseAuthOnly(payment);
 
         // [be] 다윤 260527 단일 카드 결제 요청만 강제
         for (PinAndPayRequest.CardPortion card : request.getCards()) {
             PgAuthPayRequest pgAuthRequest = PgAuthPayRequest.builder()
                     .payPaymentId(payment.getPaymentId())
                     .merchantId(payment.getMerchant_id())
-                    .billingKey(String.valueOf(card.getCardId()))
+                    .billingKey("83ae69172ddf423daf539136fa1633d2")
                     .originalAmount(payment.getAmount())
                     .approvedAmount(card.getAmount())
                     .build();
 
             final PgAuthPayResponse pgResponse;
             try {
-                pgResponse = isDutchHost
+                pgResponse = useAuthOnly
                         ? pgClient.pgPaymentAuthOnlyRequest(
                                 AUTHORIZATION,
                                 savedIdempotencyKey,
@@ -74,15 +67,16 @@ public class CorePgPaymentService {
 
             log.info("pgClientResponse : {}", pgResponse);
 
+            // [be] 다윤 260528 00:00 | pg 응답 분기
             if (pgResponse == null || pgResponse.getStatus() == null) {
                 corePgPaymentPersistenceService.markFailedAndSaveEvent(payment.getPaymentId(), pgResponse);
-                throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+                throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
             }
-
             String pgStatus = pgResponse.getStatus();
+
             if (PG_STATUS_APPROVED.equals(pgStatus)) {
-                payment.paidStatusUpdatePayment(LocalDateTime.now());
-                saveEvent(payment, pgResponse, EventEntity.EventType.PAID);
+                corePgPaymentPersistenceService.markPaidAndSaveEvent(payment.getPaymentId(), pgResponse);
+                // [be] 다윤 260528 00:00 | cardDetails 추가 예정
                 continue;
             }
 
@@ -96,16 +90,16 @@ public class CorePgPaymentService {
         }
     }
 
-    private void saveEvent(CoreEntity payment, PgAuthPayResponse pgResponse, EventEntity.EventType eventType) {
-        EventEntity savedEvent = EventEntity.builder()
-                .payment_id(payment.getPaymentId())
-                .pg_txn_id(pgResponse == null ? null : pgResponse.getPgTxnId())
-                .event_type(eventType)
-                .actor_type(EventEntity.ActorType.SYSTEM)
-                .created_at(pgResponse != null && pgResponse.getProcessedAt() != null ? pgResponse.getProcessedAt()
-                        : LocalDateTime.now())
-                .build();
+    private boolean shouldUseAuthOnly(CoreEntity payment) {
+        if (payment.getPayment_type() != CoreEntity.PaymentType.DUTCH) {
+            return false;
+        }
 
-        eventRepository.save(savedEvent);
+        CoreEntity.PaymentIntent paymentIntent = payment.getPayment_intent();
+        if (paymentIntent == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        return paymentIntent == CoreEntity.PaymentIntent.DUTCH_HOST_AUTH_ONLY_PAY;
     }
 }

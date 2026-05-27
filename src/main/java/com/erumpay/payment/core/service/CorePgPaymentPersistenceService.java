@@ -1,6 +1,5 @@
 package com.erumpay.payment.core.service;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 import org.springframework.stereotype.Service;
@@ -38,7 +37,27 @@ public class CorePgPaymentPersistenceService {
                 .pg_txn_id(pgResponse == null ? null : pgResponse.getPgTxnId())
                 .event_type(EventEntity.EventType.FAILED)
                 .fail_code(extractFailCode(pgResponse))
-                .actor_type(EventEntity.ActorType.SYSTEM)
+                .actor_type(EventEntity.ActorType.PG)
+                .created_at(pgResponse != null && pgResponse.getProcessedAt() != null
+                        ? pgResponse.getProcessedAt()
+                        : LocalDateTime.now())
+                .build();
+
+        eventRepository.save(savedEvent);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markPaidAndSaveEvent(Long paymentId, PgAuthPayResponse pgResponse) {
+        CoreEntity payment = coreRepository.findById(paymentId)
+                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+
+        payment.paidStatusUpdatePayment(LocalDateTime.now());
+
+        EventEntity savedEvent = EventEntity.builder()
+                .payment_id(payment.getPaymentId())
+                .pg_txn_id(pgResponse == null ? null : pgResponse.getPgTxnId())
+                .event_type(EventEntity.EventType.PAID)
+                .actor_type(EventEntity.ActorType.PG)
                 .created_at(pgResponse != null && pgResponse.getProcessedAt() != null
                         ? pgResponse.getProcessedAt()
                         : LocalDateTime.now())

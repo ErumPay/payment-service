@@ -94,6 +94,10 @@ public class CoreService {
                 paymentType,
                 now);
 
+        if (paymentType == CoreEntity.PaymentType.DUTCH) {
+            payment.updatePaymentIntent(CoreEntity.PaymentIntent.DUTCH_HOST_AUTH_ONLY_PAY, now);
+        }
+
         // [be] 다윤 260521 DB unique 처리
         try {
             coreRepository.saveAndFlush(payment);
@@ -141,6 +145,7 @@ public class CoreService {
 
         String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
 
+        // [be] 다윤 260528 00:00 | 멱등성 사전 체크
         Optional<ResponseEntity<PrepareResponse>> idempotentResponse = coreValidationService.validateIdempotency(userId,
                 normalizedIdempotencyKey);
         if (idempotentResponse.isPresent()) {
@@ -157,15 +162,17 @@ public class CoreService {
                     .order_no(qrService.generateUniqueOrderNo(now))
                     .order_name(request.getOrderName())
                     .amount(request.getAmount())
-                    .payment_status(CoreEntity.PaymentStatus.PAY_PENDING)
+                    .payment_status(CoreEntity.PaymentStatus.CREATED)
                     .payment_type(CoreEntity.PaymentType.DUTCH)
                     .channel_type(CoreEntity.ChannelType.OFFLINE)
                     .dutch_role(CoreEntity.DutchRole.MEMBER)
+                    .payment_intent(CoreEntity.PaymentIntent.DUTCH_MEMBER_PAY)
                     .dutch_session_id(request.getSessionId())
                     .updated_at(now)
                     .created_at(now)
                     .build());
         } catch (DataIntegrityViolationException e) {
+            // [be] 다윤 260528 00:00 | 경합(race condition) 대응
             Optional<ResponseEntity<PrepareResponse>> replayed = coreValidationService.validateIdempotency(userId,
                     normalizedIdempotencyKey);
             if (replayed.isPresent()) {
@@ -173,18 +180,16 @@ public class CoreService {
             }
             throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
         }
+
         dutchPayService.registerParticipantPayment(
                 request.getSessionId(),
                 request.getParticipantId(),
                 userId,
                 payment);
 
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                recommendCommandPublisher.publishRecommendationRequested(payment);
-            }
-        });
+        payment.payPendingStatusUpdatePayment(LocalDateTime.now());
+
+        // [be] 다윤 260528 00:00 | 추천서비스 요청 로직 추가 예정
 
         return ResponseEntity.ok(PrepareResponse.builder()
                 .paymentId(payment.getPaymentId())
@@ -225,11 +230,11 @@ public class CoreService {
         // [be] 다윤 260526 auth-service pin 인증 요청
         // AuthResponse authResponse = verifyPin(userId, request.getPin());
 
-        payment.pgRequestUpdateStatusPayment(LocalDateTime.now());
-
-        // [be] 다윤 260526 pg-payment-service 실결제 요청
+        // [be] 다윤 260526 00:00 | pg-payment-service 실결제 요청
+        payment.pgPendingStatusUpdatePayment(LocalDateTime.now());
         corePgPaymentService.requestPgPayments(payment, request);
 
+        // [be] 다윤 260526 00:00 | ??
         completeRemotePaymentIfNeeded(payment);
 
         return ResponseEntity.ok(PinAndPayResponse.builder()
@@ -268,6 +273,7 @@ public class CoreService {
         return res;
     }
 
+    // [be] 다윤 260527 일반 결제 취소
     public CanceledResponse cancel(Long userId, String idempotencyKey, Long paymentId) {
 
         log.info("/payment/cancel Service");
@@ -285,7 +291,7 @@ public class CoreService {
                 .map(CardDetailEntity::getPg_txn_id)
                 .collect(Collectors.toList());
 
-        if (payment.getPayment_status() == CoreEntity.PaymentStatus.VOIDED) {
+        if (payment.getPayment_status() == CoreEntity.PaymentStatus.CANCELED) {
             return CanceledResponse.builder()
                     .paymentId(payment.getPaymentId())
                     .paymentStatus(payment.getPayment_status().name())
@@ -336,6 +342,7 @@ public class CoreService {
 
         LocalDateTime canceledAt = LocalDateTime.now();
         payment.voidedStatusUpdatePayment(canceledAt);
+
         return CanceledResponse.builder()
                 .paymentId(payment.getPaymentId())
                 .paymentStatus(payment.getPayment_status().name())
