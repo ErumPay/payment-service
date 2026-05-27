@@ -124,6 +124,16 @@ public class CoreEntity {
         this.updated_at = failedAt;
     }
 
+    // [be] 다윤 260527 취소 성공 status 업데이트
+    public void voidedStatusUpdatePayment(LocalDateTime canceledAt) {
+        if (canceledAt == null) {
+            throw new IllegalArgumentException("canceledAt must not be null");
+        }
+        this.payment_status = PaymentStatus.CANCELED;
+        this.canceled_at = canceledAt;
+        this.updated_at = canceledAt;
+    }
+
     // [be] 다윤 260526 QR 생성시 new entity 생성
     public static CoreEntity toEntity(
             String orderNo,
@@ -212,7 +222,8 @@ public class CoreEntity {
         FAILED,
         EXPIRED,
         AUTHORIZED,
-        VOIDED
+        VOIDED,
+        CANCELED
     }
 
     public enum ChannelType {

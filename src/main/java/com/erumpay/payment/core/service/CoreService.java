@@ -1,7 +1,9 @@
 package com.erumpay.payment.core.service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import feign.FeignException;
 import org.springframework.http.ResponseEntity;
@@ -14,12 +16,18 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import com.erumpay.payment.core.client.auth.AuthClient;
 import com.erumpay.payment.core.client.auth.dto.AuthPinRequest;
 import com.erumpay.payment.core.client.auth.dto.AuthPinResponse;
+import com.erumpay.payment.core.client.pg.PgClient;
+import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
+import com.erumpay.payment.core.client.pg.dto.PgPayCancelRequest;
+import com.erumpay.payment.core.dao.CardDetailRepository;
 import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.dto.PrepareRequest;
 import com.erumpay.payment.core.domain.dto.PrepareResponse;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.DutchMemberPrepareRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
+import com.erumpay.payment.core.domain.dto.CanceledResponse;
+import com.erumpay.payment.core.domain.entity.CardDetailEntity;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -38,7 +46,11 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Transactional
 public class CoreService {
+    private static final String AUTHORIZATION = "Bearer server-test-token";
+    private static final String PG_STATUS_REJECTED = "REJECTED";
 
+    private final PgClient pgClient;
+    private final CardDetailRepository cardDetailRepository;
     private final CoreRepository coreRepository;
     private final CoreValidationService coreValidationService;
     private final CorePgPaymentService corePgPaymentService;
@@ -254,6 +266,82 @@ public class CoreService {
         }
 
         return res;
+    }
+
+    public CanceledResponse cancel(Long userId, String idempotencyKey, Long paymentId) {
+
+        log.info("/payment/cancel Service");
+        String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
+
+        CoreEntity payment = coreRepository.findById(paymentId)
+                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+
+        if (payment.getUserId() != null && !payment.getUserId().equals(userId)) {
+            throw new CustomException(ErrorCode.FORBIDDEN);
+        }
+
+        List<CardDetailEntity> cards = cardDetailRepository.findCancelableCardsByPaymentId(paymentId);
+        List<Long> canceledPgTxnIds = cards.stream()
+                .map(CardDetailEntity::getPg_txn_id)
+                .collect(Collectors.toList());
+
+        if (payment.getPayment_status() == CoreEntity.PaymentStatus.VOIDED) {
+            return CanceledResponse.builder()
+                    .paymentId(payment.getPaymentId())
+                    .paymentStatus(payment.getPayment_status().name())
+                    .canceledAt(payment.getCanceled_at())
+                    // .canceledPgTxnIds(canceledPgTxnIds)
+                    .build();
+        }
+
+        if (payment.getPayment_status() != CoreEntity.PaymentStatus.PAID) {
+            throw new CustomException(ErrorCode.CANCELED_INVALID);
+        }
+
+        if (cards.isEmpty()) {
+            throw new CustomException(ErrorCode.CANCELED_CARD_INVALID);
+        }
+
+        for (CardDetailEntity card : cards) {
+            PgPayCancelRequest cancelRequest = PgPayCancelRequest.builder()
+                    .payPaymentId(paymentId)
+                    .merchantId(payment.getMerchant_id())
+                    .cancelReason("USER_REQUEST")
+                    .build();
+
+            PgAuthPayResponse pgResponse;
+            String cancelIdempotencyKey = normalizedIdempotencyKey + "-" + card.getPg_txn_id();
+            try {
+                pgResponse = pgClient.pgPaymentCancelRequest(
+                        AUTHORIZATION,
+                        cancelIdempotencyKey,
+                        card.getPg_txn_id(),
+                        cancelRequest);
+            } catch (FeignException e) {
+                log.error("pg cancel feign error. status={}, body={}", e.status(), e.contentUTF8());
+                if (e.status() >= 400 && e.status() < 500) {
+                    throw new CustomException(ErrorCode.BAD_REQUEST);
+                }
+                throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+            }
+
+            if (pgResponse == null || pgResponse.getStatus() == null) {
+                throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+            }
+
+            if (PG_STATUS_REJECTED.equals(pgResponse.getStatus())) {
+                throw new CustomException(ErrorCode.CANCELED_PG_REJECTED);
+            }
+        }
+
+        LocalDateTime canceledAt = LocalDateTime.now();
+        payment.voidedStatusUpdatePayment(canceledAt);
+        return CanceledResponse.builder()
+                .paymentId(payment.getPaymentId())
+                .paymentStatus(payment.getPayment_status().name())
+                .canceledAt(canceledAt)
+                // .canceledPgTxnIds(canceledPgTxnIds)
+                .build();
     }
 
     private void completeRemotePaymentIfNeeded(CoreEntity payment) {
