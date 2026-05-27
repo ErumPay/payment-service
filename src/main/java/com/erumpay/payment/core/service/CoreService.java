@@ -28,6 +28,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayCreateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.service.DutchPayService;
 import com.erumpay.payment.qr.service.QrService;
+import com.erumpay.payment.remote.service.RemotePayService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -45,6 +46,7 @@ public class CoreService {
     private final AuthClient authClient;
     private final DutchPayService dutchPayService;
     private final QrService qrService;
+    private final RemotePayService remotePayService;
 
     // [be] 다윤 260526 결제 요청 시작 - 개인, 더치페이 대표자
     public ResponseEntity<PrepareResponse> prepare(Long userId, String idempotencyKey, PrepareRequest request) {
@@ -204,6 +206,9 @@ public class CoreService {
         }
 
         coreValidationService.validateCardAmounts(request);
+        if (payment.getPayment_type() == CoreEntity.PaymentType.REMOTE) {
+            remotePayService.validatePaymentCanBeRequested(payment);
+        }
 
         // [be] 다윤 260526 auth-service pin 인증 요청
         // AuthResponse authResponse = verifyPin(userId, request.getPin());
@@ -212,6 +217,8 @@ public class CoreService {
 
         // [be] 다윤 260526 pg-payment-service 실결제 요청
         corePgPaymentService.requestPgPayments(payment, request);
+
+        completeRemotePaymentIfNeeded(payment);
 
         return ResponseEntity.ok(PinAndPayResponse.builder()
                 .paymentId(payment.getPaymentId())
@@ -247,6 +254,14 @@ public class CoreService {
         }
 
         return res;
+    }
+
+    private void completeRemotePaymentIfNeeded(CoreEntity payment) {
+        if (payment.getPayment_type() != CoreEntity.PaymentType.REMOTE) {
+            return;
+        }
+
+        remotePayService.completeByPayment(payment);
     }
 
     // [be] 다윤 260522 SSE 연결 가능 여부 판단

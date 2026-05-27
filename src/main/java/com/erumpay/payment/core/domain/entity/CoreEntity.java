@@ -169,6 +169,29 @@ public class CoreEntity {
                 .build();
     }
 
+    public static CoreEntity toRemotePaymentEntity(
+            String orderNo,
+            String orderName,
+            Long amount,
+            Long userId,
+            Long remoteRequestId,
+            String idempotencyKey,
+            LocalDateTime createdAt) {
+        return CoreEntity.builder()
+                .order_no(orderNo)
+                .order_name(orderName)
+                .amount(amount)
+                .userId(userId)
+                .idempotencyKey(idempotencyKey)
+                .channel_type(ChannelType.ONLINE)
+                .payment_type(PaymentType.REMOTE)
+                .remote_request_id(remoteRequestId)
+                .payment_status(PaymentStatus.PAY_PENDING)
+                .created_at(createdAt)
+                .updated_at(createdAt)
+                .build();
+    }
+
     public void connectDutchSession(Long dutchSessionId) {
         if (dutchSessionId == null) {
             throw new IllegalArgumentException("dutchSessionId must not be null");

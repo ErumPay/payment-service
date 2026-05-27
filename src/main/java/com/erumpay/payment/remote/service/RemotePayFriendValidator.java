@@ -9,15 +9,18 @@ import com.erumpay.payment.remote.client.auth.AuthFriendClient;
 import com.erumpay.payment.remote.client.auth.dto.AuthFriendValidateRequest;
 import com.erumpay.payment.remote.client.auth.dto.AuthFriendValidateResponse;
 
+import feign.FeignException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class RemotePayFriendValidator {
 
     private final AuthFriendClient authFriendClient;
 
-    @Value("${app.remote-pay.friend-validation-enabled:false}")
+    @Value("${app.remote-pay.friend-validation-enabled:true}")
     private boolean friendValidationEnabled;
 
     public void validate(Long requesterUserId, Long targetUserId) {
@@ -29,8 +32,17 @@ public class RemotePayFriendValidator {
             return;
         }
 
-        AuthFriendValidateResponse response = authFriendClient.validateFriend(
-                new AuthFriendValidateRequest(requesterUserId, targetUserId));
+        AuthFriendValidateResponse response;
+        try {
+            response = authFriendClient.validateFriend(
+                    new AuthFriendValidateRequest(requesterUserId, targetUserId));
+        } catch (FeignException e) {
+            log.warn("Auth friend validation failed. status={}, requesterUserId={}, targetUserId={}",
+                    e.status(),
+                    requesterUserId,
+                    targetUserId);
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e);
+        }
         if (response == null || !response.isFriend()) {
             throw new CustomException(ErrorCode.FORBIDDEN);
         }
