@@ -14,6 +14,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -21,10 +22,10 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Table(name = "payment_remote_requests")
-@Builder
+@Builder(access = AccessLevel.PRIVATE)
 @Getter
-@AllArgsConstructor
-@NoArgsConstructor
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class RemotePayRequestEntity {
 
     @Id
@@ -65,6 +66,9 @@ public class RemotePayRequestEntity {
         }
         if (requesterUserId.equals(targetUserId)) {
             throw new IllegalArgumentException("requester and target must be different");
+        }
+        if (!expiresAt.isAfter(now)) {
+            throw new IllegalArgumentException("expiresAt must be after now");
         }
 
         return RemotePayRequestEntity.builder()

@@ -206,7 +206,9 @@ public class CoreService {
         }
 
         coreValidationService.validateCardAmounts(request);
-        remotePayService.validatePaymentCanBeRequested(payment);
+        if (payment.getPayment_type() == CoreEntity.PaymentType.REMOTE) {
+            remotePayService.validatePaymentCanBeRequested(payment);
+        }
 
         // [be] 다윤 260526 auth-service pin 인증 요청
         // AuthResponse authResponse = verifyPin(userId, request.getPin());
@@ -216,9 +218,7 @@ public class CoreService {
         // [be] 다윤 260526 pg-payment-service 실결제 요청
         corePgPaymentService.requestPgPayments(payment, request);
 
-        if (payment.getPayment_type() == CoreEntity.PaymentType.REMOTE) {
-            remotePayService.completeByPayment(payment);
-        }
+        completeRemotePaymentIfNeeded(payment);
 
         return ResponseEntity.ok(PinAndPayResponse.builder()
                 .paymentId(payment.getPaymentId())
@@ -254,6 +254,14 @@ public class CoreService {
         }
 
         return res;
+    }
+
+    private void completeRemotePaymentIfNeeded(CoreEntity payment) {
+        if (payment.getPayment_type() != CoreEntity.PaymentType.REMOTE) {
+            return;
+        }
+
+        remotePayService.completeByPayment(payment);
     }
 
     // [be] 다윤 260522 SSE 연결 가능 여부 판단
