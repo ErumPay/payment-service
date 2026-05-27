@@ -213,6 +213,7 @@ public class DutchPayParticipantEntity {
         }
 
         this.status = ParticipantStatus.TIMEOUT;
+        this.amount = null;
         this.updated_at = now;
     }
 
