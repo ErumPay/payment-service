@@ -35,7 +35,7 @@ public class CoreController {
     private final CoreService coreService;
     private final CoreSseService coreSseService;
 
-    // [be] 다윤 260522 개인+대표자 결제 요청
+    // [be] 다윤 260522 개인+대표자 가승인 결제 요청
     @PostMapping("/prepare")
     public ResponseEntity<PrepareResponse> prepare(
             @RequestHeader("X-User-Id") Long userId,
@@ -59,11 +59,23 @@ public class CoreController {
         return coreService.prepareMember(userId, idempotencyKey, request);
     }
 
+    // [be] 다윤 260528 01:00 | 대표자 실결제 요청
+    @PostMapping("/prepare-host")
+    public ResponseEntity<PrepareResponse> prepareHost(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
+            @Valid @RequestBody DutchMemberPrepareRequest request) {
+
+        log.info("/payment/prepare-host Controller");
+
+        return coreService.prepareHost(userId, idempotencyKey, request);
+    }
+
     // [be] 다윤 260526 결제 SSE 연결
     @GetMapping("/{paymentId}/subscribe")
     public SseEmitter sseStream(
             @RequestHeader("X-User-Id") Long userId,
-            @PathVariable Long paymentId) {
+            @PathVariable("paymentId") Long paymentId) {
         if (!coreService.userCanAccess(paymentId, userId)) {
             throw new CustomException(ErrorCode.FORBIDDEN);
         }

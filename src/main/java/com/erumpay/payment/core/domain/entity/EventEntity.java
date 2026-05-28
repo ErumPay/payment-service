@@ -41,6 +41,7 @@ public class EventEntity {
         CREATED,
         PAY_PENDING,
         PG_PENDING,
+        AUTHORIZED,
         PAID,
         CANCEL_REQUESTED,
         CANCELED,

@@ -89,7 +89,7 @@ public class RemotePayController {
     @PostMapping("/api/v1/remote-pay/requests/{request_id}/reject")
     public ResponseEntity<RemotePayCreateResponse> rejectRequest(
             @RequestHeader("X-User-Id") @Positive Long userId,
-            @PathVariable @Positive Long request_id,
+            @PathVariable("request_id") @Positive Long request_id,
             @Valid @RequestBody(required = false) RemotePayRejectRequest request) {
         log.info("/api/v1/remote-pay/requests/{}/reject Controller", request_id);
 
@@ -101,7 +101,7 @@ public class RemotePayController {
     @PostMapping("/api/v1/remote-pay/requests/{request_id}/cancel")
     public ResponseEntity<RemotePayCreateResponse> cancelRequest(
             @RequestHeader("X-User-Id") @Positive Long userId,
-            @PathVariable @Positive Long request_id) {
+            @PathVariable("request_id") @Positive Long request_id) {
         log.info("/api/v1/remote-pay/requests/{}/cancel Controller", request_id);
 
         return ResponseEntity.ok(remotePayService.cancelRequest(userId, request_id));

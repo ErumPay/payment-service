@@ -33,7 +33,7 @@ public enum ErrorCode {
 
     // 500
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 에러가 발생했습니다."),
-    INTERNAL_PG_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "pg 서버 내부 에러가 발생했습니다.");
+    INTERNAL_PG_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "PG 서버 내부 에러가 발생했습니다.");
 
     private final HttpStatus status;
     private final String message;
