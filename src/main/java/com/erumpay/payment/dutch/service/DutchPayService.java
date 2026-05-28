@@ -19,6 +19,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -91,7 +92,7 @@ public class DutchPayService {
     }
 
     // [be] 영은 260523 1120 | 대표자 가승인 성공/실패 결과를 세션 상태에 반영하고 화면 구독자에게 공유한다
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public DutchPayCreateResponse applyHostAuthorizationResult(
             Long sessionId,
             DutchPayHostAuthorizationResultRequest request) {
