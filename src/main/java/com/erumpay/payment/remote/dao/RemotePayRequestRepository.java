@@ -1,5 +1,6 @@
 package com.erumpay.payment.remote.dao;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,6 +30,28 @@ public interface RemotePayRequestRepository extends JpaRepository<RemotePayReque
             """)
     Optional<RemotePayRequestEntity> findDetailById(@Param("requestId") Long requestId);
 
+    // [be] 영은 260528 1320 | 상세 조회에서 권한 조건을 함께 적용해 타인의 request_id 존재 여부가 응답 차이로 드러나지 않게 한다.
+    @Query("""
+            select r
+            from RemotePayRequestEntity r
+            left join fetch r.payment
+            where r.request_id = :requestId
+              and (r.requester_user_id = :userId or r.target_user_id = :userId)
+            """)
+    Optional<RemotePayRequestEntity> findDetailByIdAndUserId(
+            @Param("requestId") Long requestId,
+            @Param("userId") Long userId);
+
+    // [be] 영은 260528 1330 | Core 재시도 시 같은 payment_id에 원격결제 요청이 중복 생성되지 않도록 기존 매핑을 잠금 조회한다.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select r
+            from RemotePayRequestEntity r
+            left join fetch r.payment
+            where r.payment.paymentId = :paymentId
+            """)
+    Optional<RemotePayRequestEntity> findByPaymentIdForUpdate(@Param("paymentId") Long paymentId);
+
     // [be] 영은 260527 1020 | 요청자/대상자 양쪽 홈 화면에서 진행 중 원격결제 요청을 조회한다.
     @Query("""
             select r
@@ -41,4 +64,30 @@ public interface RemotePayRequestRepository extends JpaRepository<RemotePayReque
     List<RemotePayRequestEntity> findRequestsByUserIdAndStatuses(
             @Param("userId") Long userId,
             @Param("statuses") List<RemotePayStatus> statuses);
+
+    // [be] 영은 260528 1120 | 만료 시간이 지난 PENDING 요청을 비관적 락으로 잡아 배치 중복 처리와 결제 진입 경합을 막는다.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select r
+            from RemotePayRequestEntity r
+            left join fetch r.payment
+            where r.status = :status
+              and r.expires_at <= :now
+            order by r.expires_at asc
+            """)
+    List<RemotePayRequestEntity> findExpiredTargetsForUpdate(
+            @Param("status") RemotePayStatus status,
+            @Param("now") LocalDateTime now);
+
+    // [be] 영은 260528 1330 | 배치 진입 시에는 id만 모으고, 실제 상태 변경은 요청별 짧은 트랜잭션에서 처리한다.
+    @Query("""
+            select r.request_id
+            from RemotePayRequestEntity r
+            where r.status = :status
+              and r.expires_at <= :now
+            order by r.expires_at asc
+            """)
+    List<Long> findExpiredTargetIds(
+            @Param("status") RemotePayStatus status,
+            @Param("now") LocalDateTime now);
 }

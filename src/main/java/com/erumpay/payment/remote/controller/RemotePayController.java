@@ -10,12 +10,15 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.erumpay.payment.remote.domain.dto.RemotePayCoreCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateResponse;
+import com.erumpay.payment.remote.domain.dto.RemotePayExpireBatchResponse;
 import com.erumpay.payment.remote.domain.dto.RemotePayRejectRequest;
 import com.erumpay.payment.remote.service.RemotePayService;
+import com.erumpay.payment.remote.service.RemotePaySseService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
@@ -29,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 public class RemotePayController {
 
     private final RemotePayService remotePayService;
+    private final RemotePaySseService remotePaySseService;
 
     // [be] 영은 260527 1010 | 원격결제 상세 조회 - 알림 클릭/화면 복원 시 요청자와 대상자만 현재 요청 상태를 확인한다.
     @GetMapping("/api/v1/remote-pay/requests/{request_id}")
@@ -47,6 +51,16 @@ public class RemotePayController {
         log.info("/api/v1/remote-pay/requests/active Controller");
 
         return ResponseEntity.ok(remotePayService.getActiveRequests(userId));
+    }
+
+    // [be] 영은 260528 1110 | 원격결제 상태 SSE - 요청자/대상자가 같은 request_id의 상태 변경을 실시간으로 받는다.
+    @GetMapping("/api/v1/remote-pay/requests/{request_id}/stream")
+    public SseEmitter streamRequest(
+            @RequestHeader("X-User-Id") @Positive Long userId,
+            @PathVariable @Positive Long request_id) {
+        log.info("/api/v1/remote-pay/requests/{}/stream Controller", request_id);
+
+        return remotePaySseService.subscribe(request_id, userId);
     }
 
     // [be] 영은 260527 1000 | 원격결제 요청 생성 - 초기 테스트/직접 생성용 공개 API다.
@@ -91,5 +105,13 @@ public class RemotePayController {
         log.info("/api/v1/remote-pay/requests/{}/cancel Controller", request_id);
 
         return ResponseEntity.ok(remotePayService.cancelRequest(userId, request_id));
+    }
+
+    // [be] 영은 260528 1120 | 원격결제 만료 처리 배치 - 외부 공개 없이 스케줄러/운영 호출에서만 사용한다.
+    @PostMapping("/internal/v1/remote-pay/expire-batch")
+    public ResponseEntity<RemotePayExpireBatchResponse> expireBatch() {
+        log.info("/internal/v1/remote-pay/expire-batch Controller");
+
+        return ResponseEntity.ok(remotePayService.expirePendingRequests());
     }
 }
