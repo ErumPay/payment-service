@@ -46,6 +46,7 @@ app:
   redis:
     channels:
       dutch-pay-session-events: ${DUTCH_PAY_SESSION_EVENT_CHANNEL:dutch-pay:session-events}
+      remote-pay-request-events: ${REMOTE_PAY_REQUEST_EVENT_CHANNEL:remote-pay:request-events}
   remote-pay:
     expires-after-minutes: ${REMOTE_PAY_EXPIRES_AFTER_MINUTES:30}
     friend-validation-enabled: ${REMOTE_PAY_FRIEND_VALIDATION_ENABLED:true}
