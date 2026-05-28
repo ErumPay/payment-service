@@ -2,6 +2,7 @@ package com.erumpay.payment.dutch.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
@@ -27,6 +28,7 @@ public class DutchPayRedisConfig {
     @Bean
     public RedisMessageListenerContainer dutchPayRedisMessageListenerContainer(
             RedisConnectionFactory redisConnectionFactory,
+            @Qualifier("dutchPaySessionEventTopic")
             ChannelTopic dutchPaySessionEventTopic,
             DutchPaySseRedisSubscriber dutchPaySseRedisSubscriber) {
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();

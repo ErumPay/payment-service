@@ -1,11 +1,14 @@
 package com.erumpay.payment.remote.service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.erumpay.payment.core.dao.CoreRepository;
@@ -16,6 +19,7 @@ import com.erumpay.payment.remote.dao.RemotePayRequestRepository;
 import com.erumpay.payment.remote.domain.dto.RemotePayCoreCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateResponse;
+import com.erumpay.payment.remote.domain.dto.RemotePayExpireBatchResponse;
 import com.erumpay.payment.remote.domain.entity.RemotePayRequestEntity;
 import com.erumpay.payment.remote.domain.entity.RemotePayRequestEntity.RemotePayStatus;
 
@@ -30,6 +34,7 @@ public class RemotePayService {
     private final RemotePayRequestRepository remotePayRequestRepository;
     private final CoreRepository coreRepository;
     private final RemotePayFriendValidator remotePayFriendValidator;
+    private final RemotePaySseService remotePaySseService;
     private final TransactionTemplate transactionTemplate;
 
     @Value("${app.remote-pay.expires-after-minutes:30}")
@@ -47,7 +52,9 @@ public class RemotePayService {
 
         remotePayFriendValidator.validate(requesterUserId, request.getTarget_user_id());
 
-        return transactionTemplate.execute(status -> savePendingRequest(requesterUserId, request));
+        RemotePayCreateResponse response = transactionTemplate.execute(status -> savePendingRequest(requesterUserId, request));
+        publishRequestUpdated(response.getRequest_id(), "REQUEST_CREATED", response);
+        return response;
     }
 
     // [be] 영은 260528 1010 | Core /payment/prepare에서 REMOTE 선택 시 내부 호출하는 원격결제 요청 생성 흐름이다.
@@ -64,14 +71,15 @@ public class RemotePayService {
 
         remotePayFriendValidator.validate(requesterUserId, request.getTarget_user_id());
 
-        return transactionTemplate.execute(
+        RemotePayCreateResponse response = transactionTemplate.execute(
                 status -> savePendingRequestFromCore(requesterUserId, request.getTarget_user_id(), payment,
                         request.getDescription()));
+        publishRequestUpdated(response.getRequest_id(), "REQUEST_CREATED", response);
+        return response;
     }
 
     // [be] 영은 260528 1015 | 같은 모듈 내부에서 CoreService가 HTTP 없이 직접 호출할 때 쓰는 진입점이다.
     // [be] 영은 260528 1015 | 반환된 request_id를 Core가 prepare 응답의 remoteRequestId로 내려주면 프론트/알림이 같은 요청을 추적할 수 있다.
-    @Transactional
     public RemotePayCreateResponse createRequestFromCore(
             Long requesterUserId,
             Long targetUserId,
@@ -83,7 +91,10 @@ public class RemotePayService {
 
         remotePayFriendValidator.validate(requesterUserId, targetUserId);
 
-        return savePendingRequestFromCore(requesterUserId, targetUserId, payment, description);
+        RemotePayCreateResponse response = transactionTemplate.execute(
+                status -> savePendingRequestFromCore(requesterUserId, targetUserId, payment, description));
+        publishRequestUpdated(response.getRequest_id(), "REQUEST_CREATED", response);
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -94,10 +105,8 @@ public class RemotePayService {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
 
-        RemotePayRequestEntity request = remotePayRequestRepository.findDetailById(requestId)
+        RemotePayRequestEntity request = remotePayRequestRepository.findDetailByIdAndUserId(requestId, userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
-        ensureParticipant(userId, request);
-
         return RemotePayCreateResponse.fromEntity(request);
     }
 
@@ -144,7 +153,9 @@ public class RemotePayService {
             throw new CustomException(ErrorCode.BAD_REQUEST, e);
         }
 
-        return RemotePayCreateResponse.fromEntity(request);
+        RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
+        publishAfterCommit(response.getRequest_id(), "REQUEST_REJECTED", response);
+        return response;
     }
 
     // [be] 영은 260527 1050 | 요청자는 아직 PENDING인 원격결제 요청을 취소할 수 있다.
@@ -160,7 +171,9 @@ public class RemotePayService {
             throw new CustomException(ErrorCode.BAD_REQUEST, e);
         }
 
-        return RemotePayCreateResponse.fromEntity(request);
+        RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
+        publishAfterCommit(response.getRequest_id(), "REQUEST_CANCELLED", response);
+        return response;
     }
 
     // [be] 영은 260527 1450 | 실제 PG 결제가 성공한 뒤 Core가 호출해 원격결제 요청을 COMPLETED로 전환한다.
@@ -177,6 +190,7 @@ public class RemotePayService {
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new CustomException(ErrorCode.BAD_REQUEST, e);
         }
+        publishAfterCommit(request.getRequest_id(), "PAYMENT_COMPLETED", RemotePayCreateResponse.fromEntity(request));
     }
 
     // [be] 영은 260527 1440 | Core가 PG 요청 직전에 호출해 취소/거절/만료된 원격결제가 결제되지 않도록 막는다.
@@ -193,6 +207,39 @@ public class RemotePayService {
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new CustomException(ErrorCode.BAD_REQUEST, e);
         }
+    }
+
+    // [be] 영은 260528 1120 | 원격결제 만료 배치 - 만료 시간이 지난 PENDING 요청을 EXPIRED로 확정한다.
+    // [be] 영은 260528 1120 | 한 건 실패가 전체 배치를 롤백하지 않도록 요청 단위로 예외를 격리하고 실패 id를 응답에 남긴다.
+    @Transactional
+    public RemotePayExpireBatchResponse expirePendingRequests() {
+        log.info("/internal/v1/remote-pay/expire-batch Service");
+
+        LocalDateTime now = LocalDateTime.now();
+        List<RemotePayRequestEntity> targets = remotePayRequestRepository.findExpiredTargetsForUpdate(
+                RemotePayStatus.PENDING,
+                now);
+        List<RemotePayExpireBatchResponse.ExpiredRequest> expiredRequests = new ArrayList<>();
+        List<Long> failedRequestIds = new ArrayList<>();
+
+        for (RemotePayRequestEntity request : targets) {
+            try {
+                request.expire(now);
+                RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
+                expiredRequests.add(toExpiredRequest(request));
+                publishAfterCommit(request.getRequest_id(), "REQUEST_EXPIRED", response);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                failedRequestIds.add(request.getRequest_id());
+                log.warn("RemotePay expire handling failed. request_id={}", request.getRequest_id(), e);
+            }
+        }
+
+        return RemotePayExpireBatchResponse.builder()
+                .expired_count(expiredRequests.size())
+                .failed_count(failedRequestIds.size())
+                .failed_request_ids(failedRequestIds)
+                .expired_requests(expiredRequests)
+                .build();
     }
 
     // [be] 영은 260527 1005 | payment_id 없이 payment_remote_requests 행만 생성하는 보조 흐름이다.
@@ -239,6 +286,34 @@ public class RemotePayService {
         return RemotePayCreateResponse.fromEntity(remotePayRequestRepository.save(remoteRequest));
     }
 
+    private RemotePayExpireBatchResponse.ExpiredRequest toExpiredRequest(RemotePayRequestEntity request) {
+        return RemotePayExpireBatchResponse.ExpiredRequest.builder()
+                .request_id(request.getRequest_id())
+                .requester_user_id(request.getRequester_user_id())
+                .target_user_id(request.getTarget_user_id())
+                .payment_id(request.getPayment() == null ? null : request.getPayment().getPaymentId())
+                .build();
+    }
+
+    // [be] 영은 260528 1110 | DB 커밋 성공 이후에만 SSE를 발행해 화면이 롤백된 상태를 먼저 보지 않게 한다.
+    private void publishAfterCommit(Long requestId, String eventType, RemotePayCreateResponse response) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            publishRequestUpdated(requestId, eventType, response);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                publishRequestUpdated(requestId, eventType, response);
+            }
+        });
+    }
+
+    private void publishRequestUpdated(Long requestId, String eventType, RemotePayCreateResponse response) {
+        remotePaySseService.publishRequestUpdated(requestId, eventType, response);
+    }
+
     private String normalizeDescription(String description) {
         if (description == null || description.isBlank()) {
             return null;
@@ -257,9 +332,4 @@ public class RemotePayService {
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
     }
 
-    private void ensureParticipant(Long userId, RemotePayRequestEntity request) {
-        if (!userId.equals(request.getRequester_user_id()) && !userId.equals(request.getTarget_user_id())) {
-            throw new CustomException(ErrorCode.FORBIDDEN);
-        }
-    }
 }

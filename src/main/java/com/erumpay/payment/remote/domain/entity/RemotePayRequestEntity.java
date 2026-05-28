@@ -102,6 +102,9 @@ public class RemotePayRequestEntity {
         if (payment.getPaymentId() == null || payment.getAmount() == null || payment.getAmount() <= 0) {
             throw new IllegalArgumentException("payment must be persisted and have a positive amount");
         }
+        if (payment.getUserId() == null || !targetUserId.equals(payment.getUserId())) {
+            throw new IllegalArgumentException("payment user must match remote payment target");
+        }
         if (requesterUserId.equals(targetUserId)) {
             throw new IllegalArgumentException("requester and target must be different");
         }
@@ -183,6 +186,23 @@ public class RemotePayRequestEntity {
 
         this.status = RemotePayStatus.COMPLETED;
         this.completed_at = now;
+        this.updated_at = now;
+    }
+
+    // [be] 영은 260528 1120 | 만료 배치가 PENDING 요청을 EXPIRED로 확정할 때 사용하는 상태 전이다.
+    // [be] 영은 260528 1120 | 결제 성공/거절/취소된 요청은 다시 만료 처리하지 않아 상태 전이의 단방향성을 지킨다.
+    public void expire(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        if (this.status != RemotePayStatus.PENDING) {
+            throw new IllegalStateException("remote payment request is not pending");
+        }
+        if (this.expires_at != null && this.expires_at.isAfter(now)) {
+            throw new IllegalStateException("remote payment request is not expired yet");
+        }
+
+        this.status = RemotePayStatus.EXPIRED;
         this.updated_at = now;
     }
 
