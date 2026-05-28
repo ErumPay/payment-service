@@ -64,6 +64,7 @@ public class CorePgPaymentService {
                                 pgAuthRequest);
             } catch (FeignException e) {
                 log.error("pg feign error. status={}, body={}", e.status(), e.contentUTF8());
+                notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, null);
                 if (e.status() >= 400 && e.status() < 500) {
                     throw new CustomException(ErrorCode.BAD_REQUEST);
                 }
