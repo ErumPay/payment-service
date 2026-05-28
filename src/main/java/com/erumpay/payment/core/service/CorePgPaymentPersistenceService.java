@@ -38,9 +38,7 @@ public class CorePgPaymentPersistenceService {
                 .event_type(EventEntity.EventType.FAILED)
                 .fail_code(extractFailCode(pgResponse))
                 .actor_type(EventEntity.ActorType.PG)
-                .created_at(pgResponse != null && pgResponse.getProcessedAt() != null
-                        ? pgResponse.getProcessedAt()
-                        : LocalDateTime.now())
+                .created_at(LocalDateTime.now())
                 .build();
 
         eventRepository.save(savedEvent);
@@ -58,9 +56,25 @@ public class CorePgPaymentPersistenceService {
                 .pg_txn_id(pgResponse == null ? null : pgResponse.getPgTxnId())
                 .event_type(EventEntity.EventType.PAID)
                 .actor_type(EventEntity.ActorType.PG)
-                .created_at(pgResponse != null && pgResponse.getProcessedAt() != null
-                        ? pgResponse.getProcessedAt()
-                        : LocalDateTime.now())
+                .created_at(LocalDateTime.now())
+                .build();
+
+        eventRepository.save(savedEvent);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markAuthorizedAndSaveEvent(Long paymentId, PgAuthPayResponse pgResponse) {
+        CoreEntity payment = coreRepository.findById(paymentId)
+                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+
+        payment.authorizedStatusUpdatePayment(LocalDateTime.now());
+
+        EventEntity savedEvent = EventEntity.builder()
+                .payment_id(payment.getPaymentId())
+                .pg_txn_id(pgResponse == null ? null : pgResponse.getPgTxnId())
+                .event_type(EventEntity.EventType.AUTHORIZED)
+                .actor_type(EventEntity.ActorType.PG)
+                .created_at(LocalDateTime.now())
                 .build();
 
         eventRepository.save(savedEvent);

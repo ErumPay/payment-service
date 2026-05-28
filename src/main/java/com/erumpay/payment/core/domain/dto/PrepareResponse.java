@@ -15,5 +15,10 @@ public class PrepareResponse {
 
     private Long paymentId;
     private String paymentStatus;
+    private String paymentType;
+    private String paymentIntent;
+    private String dutchRole;
+    private Long dutchSessionId;
+    private Long amount;
 
 }

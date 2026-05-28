@@ -25,6 +25,7 @@ public class CoreValidationService {
 
     // [be] 다윤 260526 멱등성 키 중복 체크 (userId + idempotencyKey)
     public Optional<ResponseEntity<PrepareResponse>> validateIdempotency(Long userId, String idempotencyKey) {
+
         Optional<CoreEntity> existing = coreRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey);
         if (existing.isEmpty()) {
             return Optional.empty();
@@ -36,9 +37,15 @@ public class CoreValidationService {
                 || status == CoreEntity.PaymentStatus.VOIDED
                 || status == CoreEntity.PaymentStatus.FAILED
                 || status == CoreEntity.PaymentStatus.EXPIRED) {
+            CoreEntity payment = existing.get();
             return Optional.of(ResponseEntity.ok(PrepareResponse.builder()
-                    .paymentId(existing.get().getPaymentId())
+                    .paymentId(payment.getPaymentId())
                     .paymentStatus(status.name())
+                    .paymentType(payment.getPayment_type() == null ? null : payment.getPayment_type().name())
+                    .paymentIntent(payment.getPayment_intent() == null ? null : payment.getPayment_intent().name())
+                    .dutchRole(payment.getDutch_role() == null ? null : payment.getDutch_role().name())
+                    .dutchSessionId(payment.getDutch_session_id())
+                    .amount(payment.getAmount())
                     .build()));
         }
 

@@ -133,6 +133,15 @@ public class CoreEntity {
         this.updated_at = paidAt;
     }
 
+    // [be] 다윤 260528 가승인 성공 status 업데이트
+    public void authorizedStatusUpdatePayment(LocalDateTime authorizedAt) {
+        if (authorizedAt == null) {
+            throw new IllegalArgumentException("authorizedAt must not be null");
+        }
+        this.payment_status = PaymentStatus.AUTHORIZED;
+        this.updated_at = authorizedAt;
+    }
+
     // [be] 다윤 260527 실결제 실패 status 업데이트
     public void failedStatusUpdatePayment(LocalDateTime failedAt) {
         if (failedAt == null) {
