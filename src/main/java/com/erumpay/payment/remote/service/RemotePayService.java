@@ -8,10 +8,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.remote.dao.RemotePayRequestRepository;
+import com.erumpay.payment.remote.domain.dto.RemotePayCoreCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateResponse;
 import com.erumpay.payment.remote.domain.entity.RemotePayRequestEntity;
@@ -26,13 +28,15 @@ import lombok.extern.slf4j.Slf4j;
 public class RemotePayService {
 
     private final RemotePayRequestRepository remotePayRequestRepository;
+    private final CoreRepository coreRepository;
     private final RemotePayFriendValidator remotePayFriendValidator;
     private final TransactionTemplate transactionTemplate;
 
     @Value("${app.remote-pay.expires-after-minutes:30}")
     private long expiresAfterMinutes;
 
-    // [be] 영은 260527 1000 | 원격결제 요청 생성 - 요청자는 결제를 직접 만들지 않고 target에게 결제 요청만 남긴다.
+    // [be] 영은 260527 1000 | 원격결제 요청 생성 - 초기 테스트/직접 생성용 흐름이다.
+    // [be] 영은 260528 1040 | 최종 B안의 기본 진입점은 Core /payment/prepare이며, 이 메서드는 payment_id 없이 요청만 만들 때 사용한다.
     // [be] 영은 260527 1000 | 친구 검증은 외부 호출이므로 DB 트랜잭션 밖에서 먼저 처리해 원격 지연이 DB 락으로 이어지지 않게 한다.
     public RemotePayCreateResponse createRequest(Long requesterUserId, RemotePayCreateRequest request) {
         log.info("/api/v1/remote-pay/requests Service");
@@ -46,8 +50,42 @@ public class RemotePayService {
         return transactionTemplate.execute(status -> savePendingRequest(requesterUserId, request));
     }
 
-    // [be] 영은 260527 1010 | 요청 상세 조회 - 알림 클릭/상세 화면 복원 시 requester 또는 target만 현재 상태를 확인한다.
-    // [be] 영은 260527 1010 | payment_id도 같이 내려줘서 결제 준비 이후에는 어떤 payment_orders와 연결됐는지 추적할 수 있게 한다.
+    // [be] 영은 260528 1010 | Core /payment/prepare에서 REMOTE 선택 시 내부 호출하는 원격결제 요청 생성 흐름이다.
+    // [be] 영은 260528 1010 | 결제 주문 생성과 상태 관리는 Core가 담당하므로, remote-pay는 전달받은 payment_id에 request_id를 연결한다.
+    public RemotePayCreateResponse createRequestFromCore(Long requesterUserId, RemotePayCoreCreateRequest request) {
+        log.info("/internal/v1/remote-pay/requests Service");
+
+        if (requesterUserId == null || request == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        CoreEntity payment = coreRepository.findById(request.getPayment_id())
+                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+
+        remotePayFriendValidator.validate(requesterUserId, request.getTarget_user_id());
+
+        return transactionTemplate.execute(
+                status -> savePendingRequestFromCore(requesterUserId, request.getTarget_user_id(), payment,
+                        request.getDescription()));
+    }
+
+    // [be] 영은 260528 1015 | 같은 모듈 내부에서 CoreService가 HTTP 없이 직접 호출할 때 쓰는 진입점이다.
+    // [be] 영은 260528 1015 | 반환된 request_id를 Core가 prepare 응답의 remoteRequestId로 내려주면 프론트/알림이 같은 요청을 추적할 수 있다.
+    @Transactional
+    public RemotePayCreateResponse createRequestFromCore(
+            Long requesterUserId,
+            Long targetUserId,
+            CoreEntity payment,
+            String description) {
+        if (requesterUserId == null || targetUserId == null || payment == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        remotePayFriendValidator.validate(requesterUserId, targetUserId);
+
+        return savePendingRequestFromCore(requesterUserId, targetUserId, payment, description);
+    }
+
     @Transactional(readOnly = true)
     public RemotePayCreateResponse getRequest(Long userId, Long requestId) {
         log.info("/api/v1/remote-pay/requests/{} Service", requestId);
@@ -81,8 +119,8 @@ public class RemotePayService {
                 .toList();
     }
 
-    // [be] 영은 260527 1430 | Core /payment/prepare가 생성/준비한 payment_orders를 원격결제 요청과 연결한다.
-    // [be] 영은 260527 1430 | 결제 금액과 결제자(userId)가 원격결제 요청의 amount/target_user_id와 맞는지 검증해 다른 요청과 섞이지 않게 한다.
+    // [be] 영은 260527 1430 | A안에서 쓰던 결제 주문 사후 연결 흐름이다.
+    // [be] 영은 260528 1040 | B안에서는 요청 생성 시점에 payment_id를 함께 묶으므로 Core 쪽 전환이 끝나면 제거 대상이다.
     @Transactional
     public void connectPaymentForPrepare(Long targetUserId, Long requestId, CoreEntity payment) {
         RemotePayRequestEntity request = getRequestForUpdate(requestId);
@@ -93,8 +131,8 @@ public class RemotePayService {
         }
     }
 
-    // [be] 영은 260527 1040 | 요청받은 사람은 결제 준비 전까지만 거절할 수 있다.
-    // [be] 영은 260527 1040 | payment_id가 연결된 뒤에는 결제가 시작된 상태라 요청 거절이 아니라 결제 취소/만료 정책으로 넘어간다.
+    // [be] 영은 260527 1040 | 요청받은 사람은 아직 PENDING인 원격결제 요청을 거절할 수 있다.
+    // [be] 영은 260528 1040 | B안에서는 payment_id가 요청 생성 시점부터 존재하므로, 취소/거절 가능 여부는 payment_id가 아니라 요청 상태로 판단한다.
     @Transactional
     public RemotePayCreateResponse rejectRequest(Long targetUserId, Long requestId, String rejectReason) {
         log.info("/api/v1/remote-pay/requests/{}/reject Service", requestId);
@@ -109,8 +147,8 @@ public class RemotePayService {
         return RemotePayCreateResponse.fromEntity(request);
     }
 
-    // [be] 영은 260527 1050 | 요청자는 결제 준비 전까지만 요청을 취소할 수 있다.
-    // [be] 영은 260527 1050 | target이 이미 결제 화면에 진입해 payment_order가 연결되면 데이터 정합성을 위해 요청 취소를 막는다.
+    // [be] 영은 260527 1050 | 요청자는 아직 PENDING인 원격결제 요청을 취소할 수 있다.
+    // [be] 영은 260528 1040 | B안에서는 payment_id가 미리 연결되어도 결제 성공 전이면 요청 취소 자체는 request status 기준으로 처리한다.
     @Transactional
     public RemotePayCreateResponse cancelRequest(Long requesterUserId, Long requestId) {
         log.info("/api/v1/remote-pay/requests/{}/cancel Service", requestId);
@@ -157,8 +195,8 @@ public class RemotePayService {
         }
     }
 
-    // [be] 영은 260527 1005 | 원격결제 도메인은 payment_remote_requests 행만 생성한다.
-    // [be] 영은 260527 1005 | payment_orders 생성/상태 변경은 Core 책임으로 분리해 기존 결제 흐름을 유지한다.
+    // [be] 영은 260527 1005 | payment_id 없이 payment_remote_requests 행만 생성하는 보조 흐름이다.
+    // [be] 영은 260528 1040 | B안의 운영 흐름에서는 savePendingRequestFromCore가 payment_orders와 원격요청을 같이 묶는다.
     private RemotePayCreateResponse savePendingRequest(Long requesterUserId, RemotePayCreateRequest request) {
         LocalDateTime now = LocalDateTime.now();
         RemotePayRequestEntity remoteRequest;
@@ -168,6 +206,30 @@ public class RemotePayService {
                     request.getTarget_user_id(),
                     request.getAmount(),
                     normalizeDescription(request.getDescription()),
+                    now.plusMinutes(expiresAfterMinutes),
+                    now);
+        } catch (IllegalArgumentException e) {
+            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+        }
+
+        return RemotePayCreateResponse.fromEntity(remotePayRequestRepository.save(remoteRequest));
+    }
+
+    // [be] 영은 260528 1020 | B안 원격결제 요청 저장 로직이다. payment_orders는 이미 존재하므로 새 결제 주문을 만들지 않는다.
+    // [be] 영은 260528 1020 | request_id와 payment_id를 처음부터 묶어두면 완료/취소/만료 알림에서 같은 원격요청을 안정적으로 추적할 수 있다.
+    private RemotePayCreateResponse savePendingRequestFromCore(
+            Long requesterUserId,
+            Long targetUserId,
+            CoreEntity payment,
+            String description) {
+        LocalDateTime now = LocalDateTime.now();
+        RemotePayRequestEntity remoteRequest;
+        try {
+            remoteRequest = RemotePayRequestEntity.pendingFromCore(
+                    requesterUserId,
+                    targetUserId,
+                    payment,
+                    normalizeDescription(description),
                     now.plusMinutes(expiresAfterMinutes),
                     now);
         } catch (IllegalArgumentException e) {

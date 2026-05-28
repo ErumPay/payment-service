@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.erumpay.payment.remote.domain.dto.RemotePayCoreCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateResponse;
 import com.erumpay.payment.remote.domain.dto.RemotePayRejectRequest;
@@ -48,8 +49,8 @@ public class RemotePayController {
         return ResponseEntity.ok(remotePayService.getActiveRequests(userId));
     }
 
-    // [be] 영은 260527 1000 | 원격결제 요청 생성 - 결제 실행은 만들지 않고 target에게 결제 요청만 생성한다.
-    // [be] 영은 260527 1000 | 실제 결제 준비는 기존 Core /api/v1/payment/prepare 흐름에서 처리한다.
+    // [be] 영은 260527 1000 | 원격결제 요청 생성 - 초기 테스트/직접 생성용 공개 API다.
+    // [be] 영은 260528 1040 | 최종 B안에서는 프론트가 Core /payment/prepare로 진입하고, Core가 내부 API로 request_id를 발급받는다.
     @PostMapping("/api/v1/remote-pay/requests")
     public ResponseEntity<RemotePayCreateResponse> createRequest(
             @RequestHeader("X-User-Id") @Positive Long userId,
@@ -59,7 +60,18 @@ public class RemotePayController {
         return ResponseEntity.ok(remotePayService.createRequest(userId, request));
     }
 
-    // [be] 영은 260527 1040 | 원격결제 거절 - 요청받은 사람이 결제 준비 전 요청을 거절한다.
+    // [be] 영은 260528 1010 | Core /payment/prepare가 REMOTE 선택 시 호출하는 내부 원격결제 요청 생성 API다.
+    // [be] 영은 260528 1010 | 프론트는 이 API를 직접 호출하지 않고, Core가 payment_id를 전달해 request_id를 발급받는다.
+    @PostMapping("/internal/v1/remote-pay/requests")
+    public ResponseEntity<RemotePayCreateResponse> createRequestFromCore(
+            @RequestHeader("X-User-Id") @Positive Long userId,
+            @Valid @RequestBody RemotePayCoreCreateRequest request) {
+        log.info("/internal/v1/remote-pay/requests Controller");
+
+        return ResponseEntity.ok(remotePayService.createRequestFromCore(userId, request));
+    }
+
+    // [be] 영은 260528 1030 | 원격결제 거절 - 요청받은 사람이 PENDING 상태의 원격결제 요청을 거절한다.
     @PostMapping("/api/v1/remote-pay/requests/{request_id}/reject")
     public ResponseEntity<RemotePayCreateResponse> rejectRequest(
             @RequestHeader("X-User-Id") @Positive Long userId,
