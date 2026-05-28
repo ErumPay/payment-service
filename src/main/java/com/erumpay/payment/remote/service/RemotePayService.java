@@ -211,26 +211,25 @@ public class RemotePayService {
 
     // [be] 영은 260528 1120 | 원격결제 만료 배치 - 만료 시간이 지난 PENDING 요청을 EXPIRED로 확정한다.
     // [be] 영은 260528 1120 | 한 건 실패가 전체 배치를 롤백하지 않도록 요청 단위로 예외를 격리하고 실패 id를 응답에 남긴다.
-    @Transactional
     public RemotePayExpireBatchResponse expirePendingRequests() {
         log.info("/internal/v1/remote-pay/expire-batch Service");
 
         LocalDateTime now = LocalDateTime.now();
-        List<RemotePayRequestEntity> targets = remotePayRequestRepository.findExpiredTargetsForUpdate(
+        List<Long> targetIds = remotePayRequestRepository.findExpiredTargetIds(
                 RemotePayStatus.PENDING,
                 now);
         List<RemotePayExpireBatchResponse.ExpiredRequest> expiredRequests = new ArrayList<>();
         List<Long> failedRequestIds = new ArrayList<>();
 
-        for (RemotePayRequestEntity request : targets) {
+        for (Long requestId : targetIds) {
             try {
-                request.expire(now);
-                RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
-                expiredRequests.add(toExpiredRequest(request));
-                publishAfterCommit(request.getRequest_id(), "REQUEST_EXPIRED", response);
-            } catch (IllegalArgumentException | IllegalStateException e) {
-                failedRequestIds.add(request.getRequest_id());
-                log.warn("RemotePay expire handling failed. request_id={}", request.getRequest_id(), e);
+                RemotePayCreateResponse response = transactionTemplate.execute(
+                        status -> expireSingleRequest(requestId, now));
+                expiredRequests.add(toExpiredRequest(response));
+                publishRequestUpdated(response.getRequest_id(), "REQUEST_EXPIRED", response);
+            } catch (RuntimeException e) {
+                failedRequestIds.add(requestId);
+                log.warn("RemotePay expire handling failed. request_id={}", requestId, e);
             }
         }
 
@@ -269,6 +268,16 @@ public class RemotePayService {
             Long targetUserId,
             CoreEntity payment,
             String description) {
+        RemotePayRequestEntity existing = remotePayRequestRepository.findByPaymentIdForUpdate(payment.getPaymentId())
+                .orElse(null);
+        if (existing != null) {
+            if (!requesterUserId.equals(existing.getRequester_user_id())
+                    || !targetUserId.equals(existing.getTarget_user_id())) {
+                throw new CustomException(ErrorCode.BAD_REQUEST);
+            }
+            return RemotePayCreateResponse.fromEntity(existing);
+        }
+
         LocalDateTime now = LocalDateTime.now();
         RemotePayRequestEntity remoteRequest;
         try {
@@ -286,12 +295,22 @@ public class RemotePayService {
         return RemotePayCreateResponse.fromEntity(remotePayRequestRepository.save(remoteRequest));
     }
 
-    private RemotePayExpireBatchResponse.ExpiredRequest toExpiredRequest(RemotePayRequestEntity request) {
+    private RemotePayCreateResponse expireSingleRequest(Long requestId, LocalDateTime now) {
+        RemotePayRequestEntity request = getRequestForUpdate(requestId);
+        try {
+            request.expire(now);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+        }
+        return RemotePayCreateResponse.fromEntity(request);
+    }
+
+    private RemotePayExpireBatchResponse.ExpiredRequest toExpiredRequest(RemotePayCreateResponse request) {
         return RemotePayExpireBatchResponse.ExpiredRequest.builder()
                 .request_id(request.getRequest_id())
                 .requester_user_id(request.getRequester_user_id())
                 .target_user_id(request.getTarget_user_id())
-                .payment_id(request.getPayment() == null ? null : request.getPayment().getPaymentId())
+                .payment_id(request.getPayment_id())
                 .build();
     }
 

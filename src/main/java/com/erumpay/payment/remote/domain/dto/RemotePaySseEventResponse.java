@@ -17,6 +17,10 @@ public class RemotePaySseEventResponse {
 
     // [be] 영은 260528 1110 | 원격결제 SSE payload를 한 형태로 고정해 프론트가 connected/status-updated 이벤트를 같은 모델로 처리하게 한다.
     public static RemotePaySseEventResponse of(String eventType, RemotePayCreateResponse request) {
+        if (request == null) {
+            throw new IllegalArgumentException("request must not be null");
+        }
+
         return RemotePaySseEventResponse.builder()
                 .event_type(eventType)
                 .request_id(request.getRequest_id())

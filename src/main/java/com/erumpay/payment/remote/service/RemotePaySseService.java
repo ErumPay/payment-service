@@ -82,11 +82,8 @@ public class RemotePaySseService {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
 
-        RemotePayRequestEntity request = remotePayRequestRepository.findDetailById(requestId)
+        RemotePayRequestEntity request = remotePayRequestRepository.findDetailByIdAndUserId(requestId, userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
-        if (!userId.equals(request.getRequester_user_id()) && !userId.equals(request.getTarget_user_id())) {
-            throw new CustomException(ErrorCode.FORBIDDEN);
-        }
 
         return RemotePayCreateResponse.fromEntity(request);
     }

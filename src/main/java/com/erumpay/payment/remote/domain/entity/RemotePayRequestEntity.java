@@ -14,6 +14,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -21,7 +22,11 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "payment_remote_requests")
+@Table(
+        name = "payment_remote_requests",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_payment_remote_requests_payment",
+                columnNames = "payment_id"))
 @Builder(access = AccessLevel.PRIVATE)
 @Getter
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
