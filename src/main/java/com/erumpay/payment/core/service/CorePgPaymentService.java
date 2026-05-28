@@ -126,8 +126,6 @@ public class CorePgPaymentService {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
 
-        log.info("notifyHostAuthorizationResultIfNeeded called.");
-
         dutchPayService.applyHostAuthorizationResult(
                 payment.getDutch_session_id(),
                 DutchPayHostAuthorizationResultRequest.builder()

@@ -75,7 +75,7 @@ public class CoreController {
     @GetMapping("/{paymentId}/subscribe")
     public SseEmitter sseStream(
             @RequestHeader("X-User-Id") Long userId,
-            @PathVariable Long paymentId) {
+            @PathVariable("paymentId") Long paymentId) {
         if (!coreService.userCanAccess(paymentId, userId)) {
             throw new CustomException(ErrorCode.FORBIDDEN);
         }

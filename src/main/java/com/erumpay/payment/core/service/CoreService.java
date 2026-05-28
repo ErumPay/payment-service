@@ -10,6 +10,7 @@ import jakarta.persistence.EntityManager;
 import org.springframework.http.ResponseEntity;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.erumpay.payment.core.client.auth.AuthClient;
@@ -244,6 +245,7 @@ public class CoreService {
     }
 
     // [be] 다윤 260526 비밀번호 확인 및 실결제 요청
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public ResponseEntity<PinAndPayResponse> request(Long userId, String idempotencyKey, PinAndPayRequest request) {
 
         log.info("/payment/request Service");
@@ -280,15 +282,13 @@ public class CoreService {
         corePgPaymentService.requestPgPayments(payment, request);
 
         // REQUIRES_NEW 트랜잭션에서 커밋된 최종 결제 상태를 응답에 반영한다.
-        entityManager.clear();
-        CoreEntity finalizedPayment = coreRepository.findById(request.getPaymentId())
-                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+        entityManager.refresh(payment);
 
         return ResponseEntity.ok(PinAndPayResponse.builder()
-                .paymentId(finalizedPayment.getPaymentId())
-                .userId(finalizedPayment.getUserId())
-                .paymentStatus(finalizedPayment.getPayment_status().name())
-                .paymentType(finalizedPayment.getPayment_type().name())
+                .paymentId(payment.getPaymentId())
+                .userId(payment.getUserId())
+                .paymentStatus(payment.getPayment_status().name())
+                .paymentType(payment.getPayment_type().name())
                 .build());
     }
 

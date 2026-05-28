@@ -54,7 +54,7 @@ public class DutchPayController {
     // [be] 영은 260523 1120 | core가 대표자 가승인 결과를 dutch에 전달하는 내부 콜백 API
     @PostMapping("/internal/v1/dutch-pay/sessions/{session_id}/host-authorization-result")
     public ResponseEntity<DutchPayCreateResponse> applyHostAuthorizationResult(
-            @PathVariable Long session_id,
+            @PathVariable("session_id") Long session_id,
             @RequestBody DutchPayHostAuthorizationResultRequest request) {
         log.info("/internal/v1/dutch-pay/sessions/{}/host-authorization-result Controller", session_id);
 
@@ -64,7 +64,7 @@ public class DutchPayController {
     // [be] 영은 260523 1120 | core가 DUTCH/MEMBER 결제 생성 전 참여자와 부담 금액을 검증하는 내부 API
     @PostMapping("/internal/v1/dutch-pay/sessions/{session_id}/participants/validate-payment")
     public ResponseEntity<DutchPayParticipantPaymentValidateResponse> validateParticipantPayment(
-            @PathVariable Long session_id,
+            @PathVariable("session_id") Long session_id,
             @RequestBody DutchPayParticipantPaymentValidateRequest request) {
         log.info("/internal/v1/dutch-pay/sessions/{}/participants/validate-payment Controller", session_id);
 
@@ -74,7 +74,7 @@ public class DutchPayController {
     // [be] 영은 260526 1620 | core/PG 결제 완료 이벤트를 받아 더치페이 참여자 결제 상태를 반영하는 내부 API
     @PostMapping("/internal/v1/dutch-pay/sessions/{session_id}/participants/payment-result")
     public ResponseEntity<DutchPaySessionDetailResponse> applyParticipantPaymentResult(
-            @PathVariable Long session_id,
+            @PathVariable("session_id") Long session_id,
             @Valid @RequestBody DutchPayParticipantPaymentResultRequest request) {
         log.info("/internal/v1/dutch-pay/sessions/{}/participants/payment-result Controller", session_id);
 
@@ -92,7 +92,7 @@ public class DutchPayController {
     @GetMapping("/api/v1/dutch-pay/sessions/{session_id}")
     public ResponseEntity<DutchPaySessionDetailResponse> getSession(
             @RequestHeader("X-User-Id") Long userId,
-            @PathVariable Long session_id) {
+            @PathVariable("session_id") Long session_id) {
         log.info("/api/v1/dutch-pay/sessions/{} Controller", session_id);
 
         return ResponseEntity.ok(dutchPayService.getSession(userId, session_id));
@@ -102,7 +102,7 @@ public class DutchPayController {
     @GetMapping("/api/v1/dutch-pay/sessions/{session_id}/my-payment")
     public ResponseEntity<DutchPayMyPaymentResponse> getMyPayment(
             @RequestHeader("X-User-Id") Long userId,
-            @PathVariable Long session_id) {
+            @PathVariable("session_id") Long session_id) {
         log.info("/api/v1/dutch-pay/sessions/{}/my-payment Controller", session_id);
 
         return ResponseEntity.ok(dutchPayService.getMyPayment(userId, session_id));
@@ -112,7 +112,7 @@ public class DutchPayController {
     @GetMapping("/api/v1/dutch-pay/sessions/{session_id}/stream")
     public SseEmitter streamSession(
             @RequestHeader("X-User-Id") Long userId,
-            @PathVariable Long session_id) {
+            @PathVariable("session_id") Long session_id) {
         log.info("/api/v1/dutch-pay/sessions/{}/stream Controller", session_id);
 
         return dutchPaySseService.subscribe(session_id, userId);
@@ -131,7 +131,7 @@ public class DutchPayController {
     @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/invites")
     public ResponseEntity<DutchPaySessionDetailResponse> inviteAppFriends(
             @RequestHeader("X-User-Id") Long userId,
-            @PathVariable Long session_id,
+            @PathVariable("session_id") Long session_id,
             @Valid @RequestBody DutchPayInviteRequest request) {
         log.info("/api/v1/dutch-pay/sessions/{}/invites Controller", session_id);
 
@@ -142,7 +142,7 @@ public class DutchPayController {
     @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/invite-links")
     public ResponseEntity<DutchPayInviteLinkResponse> createInviteLink(
             @RequestHeader("X-User-Id") Long userId,
-            @PathVariable Long session_id) {
+            @PathVariable("session_id") Long session_id) {
         log.info("/api/v1/dutch-pay/sessions/{}/invite-links Controller", session_id);
 
         return ResponseEntity.ok(dutchPayService.createInviteLink(userId, session_id));
@@ -152,7 +152,7 @@ public class DutchPayController {
     @PostMapping("/api/v1/dutch-pay/invite-links/{invite_token}/accept")
     public ResponseEntity<DutchPaySessionDetailResponse> acceptInviteLink(
             @RequestHeader("X-User-Id") Long userId,
-            @PathVariable String invite_token) {
+            @PathVariable("invite_token") String invite_token) {
         log.info("/api/v1/dutch-pay/invite-links/accept Controller");
 
         return ResponseEntity.ok(dutchPayService.acceptInviteLink(userId, invite_token));
@@ -162,7 +162,7 @@ public class DutchPayController {
     @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/reject")
     public ResponseEntity<DutchPaySessionDetailResponse> rejectInvite(
             @RequestHeader("X-User-Id") Long userId,
-            @PathVariable Long session_id) {
+            @PathVariable("session_id") Long session_id) {
         log.info("/api/v1/dutch-pay/sessions/{}/reject Controller", session_id);
 
         return ResponseEntity.ok(dutchPayService.rejectInvite(userId, session_id));
@@ -172,7 +172,7 @@ public class DutchPayController {
     @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/participants/confirm")
     public ResponseEntity<DutchPaySessionDetailResponse> confirmParticipants(
             @RequestHeader("X-User-Id") Long userId,
-            @PathVariable Long session_id,
+            @PathVariable("session_id") Long session_id,
             @RequestBody(required = false) DutchPayParticipantsConfirmRequest request) {
         log.info("/api/v1/dutch-pay/sessions/{}/participants/confirm Controller", session_id);
 
@@ -183,7 +183,7 @@ public class DutchPayController {
     @PatchMapping("/api/v1/dutch-pay/sessions/{session_id}/split-method")
     public ResponseEntity<DutchPaySessionDetailResponse> updateSplitMethod(
             @RequestHeader("X-User-Id") Long userId,
-            @PathVariable Long session_id,
+            @PathVariable("session_id") Long session_id,
             @Valid @RequestBody DutchPaySplitMethodRequest request) {
         log.info("/api/v1/dutch-pay/sessions/{}/split-method Controller", session_id);
 
@@ -194,7 +194,7 @@ public class DutchPayController {
     @PatchMapping("/api/v1/dutch-pay/sessions/{session_id}/my-amount")
     public ResponseEntity<DutchPaySessionDetailResponse> updateMyAmount(
             @RequestHeader("X-User-Id") Long userId,
-            @PathVariable Long session_id,
+            @PathVariable("session_id") Long session_id,
             @Valid @RequestBody DutchPayAmountRequest request) {
         log.info("/api/v1/dutch-pay/sessions/{}/my-amount Controller", session_id);
 
