@@ -16,10 +16,6 @@ public class DutchPayParticipantPaymentResultRequest {
 
     @NotNull
     @Positive
-    private Long participant_id;
-
-    @NotNull
-    @Positive
     private Long user_id;
 
     @NotNull

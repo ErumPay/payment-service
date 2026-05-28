@@ -191,10 +191,10 @@ public class DutchPayService {
         ensureInProgress(session);
 
         DutchPayParticipantEntity participant = dutchPayParticipantRepository
-                .findParticipantForPaymentUpdate(
+                .findParticipantForPaymentResultUpdate(
                         sessionId,
-                        request.getParticipant_id(),
-                        request.getUser_id())
+                        request.getUser_id(),
+                        request.getPayment_id())
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
         if (request.getUser_id().equals(session.getHost_user_id())) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
@@ -566,7 +566,6 @@ public class DutchPayService {
             DutchPayParticipantPaymentResultRequest request) {
         if (sessionId == null
                 || request == null
-                || request.getParticipant_id() == null
                 || request.getUser_id() == null
                 || request.getPayment_id() == null
                 || request.getStatus() == null
