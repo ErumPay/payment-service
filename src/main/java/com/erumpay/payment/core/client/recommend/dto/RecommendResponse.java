@@ -16,6 +16,7 @@ import lombok.ToString;
 @NoArgsConstructor
 @Getter
 @ToString
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class RecommendResponse {
 
     private Long paymentId;
@@ -27,6 +28,7 @@ public class RecommendResponse {
     @NoArgsConstructor
     @Getter
     @ToString
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Result {
         private String strategyType;
         private Long totalBenefitAmount;
