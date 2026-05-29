@@ -24,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class CorePgPaymentService {
 
+    private final CoreSseService coreSseService;
     private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String PG_STATUS_APPROVED = "APPROVED";
     private static final String PG_STATUS_REJECTED = "REJECTED";
@@ -36,7 +37,6 @@ public class CorePgPaymentService {
     private final DutchPayService dutchPayService;
     private final CardClient cardClient;
 
-    // [be] 다윤 260526 pg-payment-service 실결제 요청
     public void requestPgPayments(CoreEntity payment, PinAndPayRequest request) {
 
         String savedIdempotencyKey = payment.getIdempotencyKey();
@@ -45,6 +45,7 @@ public class CorePgPaymentService {
         }
 
         boolean useAuthOnly = shouldUseAuthOnly(payment);
+        coreSseService.pushEvent(payment.getPaymentId(), "결제 요청 중", "PENDING");
 
         // [be] 다윤 260527 단일 카드 결제 요청만 강제
         for (PinAndPayRequest.CardPortion card : request.getCards()) {
@@ -86,6 +87,7 @@ public class CorePgPaymentService {
             if (pgResponse == null || pgResponse.getStatus() == null) {
                 corePgPaymentPersistenceService.markFailedAndSaveEvent(payment.getPaymentId(), pgResponse);
                 notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, pgResponse);
+                coreSseService.pushEvent(payment.getPaymentId(), "결제실패", "FAILED");
                 throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
             }
             String pgStatus = pgResponse.getStatus();
@@ -94,9 +96,13 @@ public class CorePgPaymentService {
                 if (useAuthOnly) {
                     corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
                     notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
+                    coreSseService.pushEvent(payment.getPaymentId(), "결제성공", "PAID");
+                    coreSseService.completeSubscriptions(payment.getPaymentId());
                 } else {
                     corePgPaymentPersistenceService.markPaidAndSaveEvent(payment.getPaymentId(), pgResponse);
                     notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
+                    coreSseService.pushEvent(payment.getPaymentId(), "결제성공", "PAID");
+                    coreSseService.completeSubscriptions(payment.getPaymentId());
                 }
                 // [be] 다윤 260528 00:00 | cardDetails 추가 예정
                 continue;
