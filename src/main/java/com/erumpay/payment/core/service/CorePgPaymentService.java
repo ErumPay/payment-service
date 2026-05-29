@@ -10,6 +10,7 @@ import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequest;
 import com.erumpay.payment.dutch.service.DutchPayService;
 
 import feign.FeignException;
@@ -26,6 +27,7 @@ public class CorePgPaymentService {
     private static final String PG_STATUS_REJECTED = "REJECTED";
     private static final String HOST_AUTH_STATUS_AUTHORIZED = "AUTHORIZED";
     private static final String HOST_AUTH_STATUS_FAILED = "FAILED";
+    private static final String PARTICIPANT_PAYMENT_STATUS_PAID = "PAID";
 
     private final PgClient pgClient;
     private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
@@ -87,6 +89,7 @@ public class CorePgPaymentService {
                     notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
                 } else {
                     corePgPaymentPersistenceService.markPaidAndSaveEvent(payment.getPaymentId(), pgResponse);
+                    notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
                 }
                 // [be] 다윤 260528 00:00 | cardDetails 추가 예정
                 continue;
@@ -134,5 +137,50 @@ public class CorePgPaymentService {
                         .status(status)
                         .fail_code(pgResponse == null ? null : pgResponse.getFailureCode())
                         .build());
+    }
+
+    private void notifyParticipantPaymentResultIfNeeded(
+            CoreEntity payment,
+            String status,
+            PgAuthPayResponse pgResponse) {
+
+        log.info("paricipant payment result: {}", status);
+
+        if (!shouldNotifyParticipantPaymentResult(payment)) {
+            return;
+        }
+
+        if (payment.getDutch_session_id() == null || payment.getUserId() == null) {
+            log.error("participant payment result notify skipped. paymentId={}, sessionId={}, userId={}, failCode={}",
+                    payment.getPaymentId(),
+                    payment.getDutch_session_id(),
+                    payment.getUserId(),
+                    pgResponse == null ? null : pgResponse.getFailureCode());
+            return;
+        }
+
+        try {
+            dutchPayService.applyParticipantPaymentResult(
+                    payment.getDutch_session_id(),
+                    DutchPayParticipantPaymentResultRequest.builder()
+                            .user_id(payment.getUserId())
+                            .payment_id(payment.getPaymentId())
+                            .status(status)
+                            .build());
+        } catch (RuntimeException e) {
+            log.error("participant payment result notify failed. paymentId={}, sessionId={}, userId={}, failCode={}",
+                    payment.getPaymentId(),
+                    payment.getDutch_session_id(),
+                    payment.getUserId(),
+                    pgResponse == null ? null : pgResponse.getFailureCode(),
+                    e);
+        }
+    }
+
+    private boolean shouldNotifyParticipantPaymentResult(CoreEntity payment) {
+        if (payment.getPayment_type() != CoreEntity.PaymentType.DUTCH) {
+            return false;
+        }
+        return payment.getPayment_intent() == CoreEntity.PaymentIntent.DUTCH_MEMBER_PAY;
     }
 }
