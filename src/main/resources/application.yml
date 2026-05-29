@@ -56,3 +56,6 @@ auth:
 
 pg:
   base-url: ${PG_BASE_URL}
+
+recommend:
+  base-url: ${RECOMMEND_BASE_URL}

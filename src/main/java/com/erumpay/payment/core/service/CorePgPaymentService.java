@@ -48,7 +48,7 @@ public class CorePgPaymentService {
             PgAuthPayRequest pgAuthRequest = PgAuthPayRequest.builder()
                     .payPaymentId(payment.getPaymentId())
                     .merchantId(payment.getMerchant_id())
-                    .billingKey("c1ed854b963e4386abf7cbc592e43141")
+                    .billingKey("1113dd5786334f4ea76e29afc85a7d44")
                     .originalAmount(payment.getAmount())
                     .approvedAmount(card.getAmount())
                     .build();

@@ -37,14 +37,14 @@ public class CoreController {
 
     // [be] 다윤 260522 개인+대표자 가승인 결제 요청
     @PostMapping("/prepare")
-    public ResponseEntity<PrepareResponse> prepare(
+    public ResponseEntity<PrepareResponse> preparePay(
             @RequestHeader("X-User-Id") Long userId,
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody PrepareRequest request) {
 
         log.info("/payment/prepare Controller");
 
-        return coreService.prepare(userId, idempotencyKey, request);
+        return coreService.preparePay(userId, idempotencyKey, request);
     }
 
     // [be] 다윤 260522 참여자 결제 요청
@@ -86,26 +86,26 @@ public class CoreController {
 
     // [be] 다윤 260526 비밀번호 확인 및 실결제 요청
     @PostMapping("/request")
-    public ResponseEntity<PinAndPayResponse> request(
+    public ResponseEntity<PinAndPayResponse> requestPay(
             @RequestHeader("X-User-Id") Long userId,
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody PinAndPayRequest request) {
 
         log.info("/payment/request controller");
 
-        return coreService.request(userId, idempotencyKey, request);
+        return coreService.requestPay(userId, idempotencyKey, request);
     }
 
     // [be] 다윤 260527 결제 취소 요청
     @PostMapping("/{paymentId}/cancel")
-    public ResponseEntity<CanceledResponse> cancel(
+    public ResponseEntity<CanceledResponse> cancelPay(
             @RequestHeader("X-User-Id") Long userId,
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @PathVariable("paymentId") Long paymentId) {
 
         log.info("/payment/cancel Controller");
 
-        return ResponseEntity.ok(coreService.cancel(userId, idempotencyKey, paymentId));
+        return ResponseEntity.ok(coreService.cancelPay(userId, idempotencyKey, paymentId));
     }
 
 }
