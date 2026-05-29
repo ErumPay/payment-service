@@ -2,6 +2,8 @@ package com.erumpay.payment.core.service;
 
 import org.springframework.stereotype.Service;
 
+import com.erumpay.payment.core.client.card.CardClient;
+import com.erumpay.payment.core.client.card.dto.CardBillingKeyResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
@@ -32,6 +34,7 @@ public class CorePgPaymentService {
     private final PgClient pgClient;
     private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
     private final DutchPayService dutchPayService;
+    private final CardClient cardClient;
 
     // [be] 다윤 260526 pg-payment-service 실결제 요청
     public void requestPgPayments(CoreEntity payment, PinAndPayRequest request) {
@@ -45,10 +48,16 @@ public class CorePgPaymentService {
 
         // [be] 다윤 260527 단일 카드 결제 요청만 강제
         for (PinAndPayRequest.CardPortion card : request.getCards()) {
+
+            // [be] 다윤 260529 billing-key 조회
+            CardBillingKeyResponse billingKey = cardClient.billingKeyLookUp(card.getCardId(), payment.getUserId());
+            
+            log.info(billingKey.getBillingKey());
+
             PgAuthPayRequest pgAuthRequest = PgAuthPayRequest.builder()
                     .payPaymentId(payment.getPaymentId())
                     .merchantId(payment.getMerchant_id())
-                    .billingKey("1113dd5786334f4ea76e29afc85a7d44")
+                    .billingKey(billingKey.getBillingKey())
                     .originalAmount(payment.getAmount())
                     .approvedAmount(card.getAmount())
                     .build();
