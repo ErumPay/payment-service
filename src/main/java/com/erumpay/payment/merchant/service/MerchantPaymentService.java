@@ -31,7 +31,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 @Transactional
 public class MerchantPaymentService {
-    private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String CANCEL_REASON = "MERCHANT_REQUEST";
     private static final String PG_STATUS_REJECTED = "REJECTED";
 
@@ -44,6 +43,9 @@ public class MerchantPaymentService {
 
     @Value("${spring.qr.baseUrl}")
     private String checkoutBaseUrl;
+
+    @Value("${pg.authorization}")
+    private String pgAuthorization;
 
     // [be] 나영은 260529 1638 | SDK 결제 생성 진입점. merchantId + Idempotency-Key 기준으로 중복 주문 생성을 막는다.
     public MerchantPaymentResponse create(
@@ -78,7 +80,8 @@ public class MerchantPaymentService {
          * boundary: Authorization -> merchantId, then paymentId must belong to that
          * merchant. That ownership check already happened in findMerchantPayment().
          */
-        if (payment.getPayment_status() == CoreEntity.PaymentStatus.CANCELED) {
+        if (payment.getPayment_status() == CoreEntity.PaymentStatus.CANCELED
+                || payment.getPayment_status() == CoreEntity.PaymentStatus.VOIDED) {
             return MerchantCancelResponse.builder()
                     .paymentId(payment.getPaymentId())
                     .status(payment.getPayment_status().name())
@@ -106,15 +109,15 @@ public class MerchantPaymentService {
             String cancelIdempotencyKey = normalizedIdempotencyKey + "-" + card.getPg_txn_id();
             try {
                 pgResponse = pgClient.pgPaymentCancelRequest(
-                        AUTHORIZATION,
+                        pgAuthorization,
                         cancelIdempotencyKey,
                         card.getPg_txn_id(),
                         cancelRequest);
             } catch (FeignException e) {
                 if (e.status() >= 400 && e.status() < 500) {
-                    throw new CustomException(ErrorCode.BAD_REQUEST);
+                    throw new CustomException(ErrorCode.BAD_REQUEST, e);
                 }
-                throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+                throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR, e);
             }
 
             if (pgResponse == null || pgResponse.getStatus() == null) {

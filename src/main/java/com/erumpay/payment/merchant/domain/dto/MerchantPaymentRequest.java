@@ -2,6 +2,8 @@ package com.erumpay.payment.merchant.domain.dto;
 
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 
+import org.hibernate.validator.constraints.URL;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -27,6 +29,8 @@ public class MerchantPaymentRequest {
     @NotNull
     private CoreEntity.ChannelType channel;
 
+    @URL
     private String successUrl;
+    @URL
     private String failUrl;
 }

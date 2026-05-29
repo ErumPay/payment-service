@@ -5,12 +5,16 @@ import org.springframework.stereotype.Component;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 
+import lombok.extern.slf4j.Slf4j;
+
 @Component
+@Slf4j
 public class MerchantApiKeyResolver {
 
     // [be] 나영은 260529 1638 | 임시 SDK 테스트용 resolver. 추후 merchant-service API Key 검증 API 연동으로 교체한다.
     public Long resolveMerchantId(String authorization) {
         if (authorization == null || !authorization.startsWith("Bearer ")) {
+            log.warn("Merchant API authorization header is missing or invalid.");
             throw new CustomException(ErrorCode.FORBIDDEN);
         }
 
@@ -24,13 +28,15 @@ public class MerchantApiKeyResolver {
         }
 
         if (idPart == null || idPart.isBlank()) {
+            log.warn("Merchant API key format is invalid.");
             throw new CustomException(ErrorCode.FORBIDDEN);
         }
 
         try {
             return Long.valueOf(idPart);
         } catch (NumberFormatException e) {
-            throw new CustomException(ErrorCode.FORBIDDEN);
+            log.warn("Merchant API key contains non-numeric merchant id. idPart={}", idPart);
+            throw new CustomException(ErrorCode.FORBIDDEN, e);
         }
     }
 }
