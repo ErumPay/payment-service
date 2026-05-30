@@ -100,9 +100,9 @@ public class DutchPayService {
         validateHostAuthorizationResultRequest(sessionId, request);
 
         DutchPaySessionEntity session = dutchPaySessionRepository.findById(sessionId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND));
         if (!session.getHost_auth_payment_id().equals(request.getPayment_id())) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_HOST_AUTH_NOT_CREATED);
         }
 
         session.applyHostAuthorizationResult("AUTHORIZED".equalsIgnoreCase(request.getStatus()));
@@ -120,9 +120,9 @@ public class DutchPayService {
         validateParticipantPaymentRequest(sessionId, request);
 
         DutchPaySessionEntity session = dutchPaySessionRepository.findById(sessionId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND));
         if (session.getStatus() != DutchPayStatus.IN_PROGRESS) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw sessionStateException(session);
         }
 
         DutchPayParticipantEntity participant = dutchPayParticipantRepository
@@ -130,12 +130,14 @@ public class DutchPayService {
                         sessionId,
                         request.getParticipant_id(),
                         request.getUser_id())
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
         if (participant.getStatus() != ParticipantStatus.PENDING
                 || participant.getPayment() != null
-                || participant.getAmount() == null
-                || !participant.getAmount().equals(request.getAmount())) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+                || participant.getAmount() == null) {
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
+        }
+        if (!participant.getAmount().equals(request.getAmount())) {
+            throw new CustomException(ErrorCode.DUTCH_AMOUNT_MISMATCH);
         }
 
         return DutchPayParticipantPaymentValidateResponse.valid(
@@ -158,7 +160,7 @@ public class DutchPayService {
                 || userId == null
                 || payment == null
                 || payment.getPaymentId() == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
 
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
@@ -166,15 +168,15 @@ public class DutchPayService {
 
         DutchPayParticipantEntity participant = dutchPayParticipantRepository
                 .findParticipantForPaymentUpdate(sessionId, participantId, userId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
         if (userId.equals(session.getHost_user_id())) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
         }
 
         try {
             participant.startPayment(payment, LocalDateTime.now());
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw toParticipantPaymentException(e);
         }
 
         publishSessionUpdated(sessionId, "PARTICIPANT_PAYMENT_CREATED");
@@ -195,15 +197,15 @@ public class DutchPayService {
                         sessionId,
                         request.getUser_id(),
                         request.getPayment_id())
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
         if (request.getUser_id().equals(session.getHost_user_id())) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
         }
 
         try {
             participant.completePayment(request.getPayment_id(), LocalDateTime.now());
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw toParticipantPaymentException(e);
         }
 
         List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
@@ -296,7 +298,7 @@ public class DutchPayService {
         DutchPayParticipantEntity participant = participants.stream()
                 .filter(item -> item.getUser_id().equals(userId))
                 .findFirst()
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
 
         return DutchPayMyPaymentResponse.fromEntity(session, participant);
     }
@@ -305,7 +307,7 @@ public class DutchPayService {
     @Transactional(readOnly = true)
     public List<DutchPaySessionDetailResponse> getActiveSessions(Long userId) {
         if (userId == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
 
         return dutchPaySessionRepository.findActiveSessionsByUserId(
@@ -334,7 +336,7 @@ public class DutchPayService {
             if (inviteeUserId == null
                     || inviteeUserId.equals(session.getHost_user_id())
                     || dutchPayParticipantRepository.existsBySessionIdAndUserId(sessionId, inviteeUserId)) {
-                throw new CustomException(ErrorCode.BAD_REQUEST);
+                throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
             }
 
             dutchPayParticipantRepository.save(
@@ -363,7 +365,7 @@ public class DutchPayService {
     @Transactional
     public DutchPaySessionDetailResponse acceptInviteLink(Long userId, String inviteToken) {
         if (userId == null || inviteToken == null || inviteToken.isBlank()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVITE_TOKEN_INVALID);
         }
 
         Long sessionId = parseSessionIdFromInviteToken(inviteToken);
@@ -372,7 +374,7 @@ public class DutchPayService {
 
         if (userId.equals(session.getHost_user_id())
                 || dutchPayParticipantRepository.existsBySessionIdAndUserId(sessionId, userId)) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
         }
 
         dutchPayParticipantRepository.save(
@@ -385,7 +387,7 @@ public class DutchPayService {
     @Transactional
     public DutchPaySessionDetailResponse rejectInvite(Long userId, Long sessionId) {
         if (userId == null || sessionId == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
 
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
@@ -393,9 +395,9 @@ public class DutchPayService {
 
         DutchPayParticipantEntity participant = dutchPayParticipantRepository
                 .findBySessionIdAndUserId(sessionId, userId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
         if (userId.equals(session.getHost_user_id())) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
         }
 
         participant.reject(LocalDateTime.now());
@@ -418,7 +420,7 @@ public class DutchPayService {
         LocalDateTime now = LocalDateTime.now();
         List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
         if (participants.isEmpty()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND);
         }
 
         participants.forEach(participant -> participant.confirm(now));
@@ -436,10 +438,10 @@ public class DutchPayService {
     @Transactional
     public DutchPaySessionDetailResponse updateSplitMethod(
             Long hostUserId,
-            Long sessionId,
-            DutchPaySplitMethodRequest request) {
+        Long sessionId,
+        DutchPaySplitMethodRequest request) {
         if (request == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
 
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
@@ -461,18 +463,18 @@ public class DutchPayService {
             Long sessionId,
             DutchPayAmountRequest request) {
         if (userId == null || sessionId == null || request == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
 
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
         ensureInProgress(session);
         if (session.getSplit_method() != SplitMethod.CUSTOM || userId.equals(session.getHost_user_id())) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
         }
 
         DutchPayParticipantEntity participant = dutchPayParticipantRepository
                 .findBySessionIdAndUserId(sessionId, userId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
         participant.updateAmount(request.getAmount(), LocalDateTime.now());
 
         List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
@@ -491,7 +493,7 @@ public class DutchPayService {
                 || request.getTotal_amount() <= 0
                 || request.getOrder_name() == null
                 || request.getOrder_name().isBlank()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
     }
 
@@ -508,13 +510,13 @@ public class DutchPayService {
                 .reduce(0L, Long::sum);
         long hostFinalAmount = session.getTotal_amount() - paidMemberAmount;
         if (hostFinalAmount < 0) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_AMOUNT_MISMATCH);
         }
 
         DutchPayParticipantEntity host = participants.stream()
                 .filter(participant -> participant.getUser_id().equals(session.getHost_user_id()))
                 .findFirst()
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
         host.assignAmount(hostFinalAmount, now);
 
         participants.stream()
@@ -542,7 +544,7 @@ public class DutchPayService {
                 || request.getPayment_id() == null
                 || request.getStatus() == null
                 || request.getStatus().isBlank()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
     }
 
@@ -556,7 +558,7 @@ public class DutchPayService {
                 || request.getUser_id() == null
                 || request.getAmount() == null
                 || request.getAmount() <= 0) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
     }
 
@@ -572,7 +574,7 @@ public class DutchPayService {
                 || request.getStatus().isBlank()
                 || (!"PAID".equalsIgnoreCase(request.getStatus())
                 && !"APPROVED".equalsIgnoreCase(request.getStatus()))) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
     }
 
@@ -586,28 +588,28 @@ public class DutchPayService {
                 || request == null
                 || request.getUser_ids() == null
                 || request.getUser_ids().isEmpty()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
     }
 
     // [be] 영은 260523 1120 | 세션 조회 공통 처리
     private DutchPaySessionEntity getSessionOrThrow(Long sessionId) {
         if (sessionId == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
 
         return dutchPaySessionRepository.findById(sessionId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND));
     }
 
     // Serializes participant payment callbacks per session so the final callback cannot miss session completion.
     private DutchPaySessionEntity getSessionForPaymentResultUpdate(Long sessionId) {
         if (sessionId == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
 
         return dutchPaySessionRepository.findByIdForUpdate(sessionId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND));
     }
 
     // [be] 영은 260523 1120 | 화면 응답과 배분 계산에 필요한 참여자 목록을 participant_id 순서로 조회한다
@@ -656,8 +658,13 @@ public class DutchPayService {
         try {
             session.requireHost(hostUserId);
             session.requireInProgress();
-        } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+        } catch (IllegalStateException e) {
+            if (hostUserId == null || !session.getHost_user_id().equals(hostUserId)) {
+                throw new CustomException(ErrorCode.DUTCH_HOST_ONLY_ACTION, e);
+            }
+            throw sessionStateException(session, e);
+        } catch (IllegalArgumentException e) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST, e);
         }
     }
 
@@ -666,7 +673,7 @@ public class DutchPayService {
         try {
             session.requireInProgress();
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw sessionStateException(session, e);
         }
     }
 
@@ -676,7 +683,7 @@ public class DutchPayService {
             List<DutchPayParticipantEntity> participants,
             Long userId) {
         if (userId == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
         if (session.getHost_user_id().equals(userId)) {
             return;
@@ -685,7 +692,7 @@ public class DutchPayService {
         boolean participant = participants.stream()
                 .anyMatch(item -> item.getUser_id().equals(userId));
         if (!participant) {
-            throw new CustomException(ErrorCode.FORBIDDEN);
+            throw new CustomException(ErrorCode.DUTCH_ACCESS_DENIED);
         }
     }
 
@@ -694,11 +701,42 @@ public class DutchPayService {
         try {
             return SplitMethod.valueOf(splitMethod.trim().toUpperCase(Locale.ROOT));
         } catch (RuntimeException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST, e);
         }
     }
 
     // [be] 영은 260523 1120 | 선택한 배분 방식에 따라 참여자 금액을 초기화하거나 계산한다
+    private CustomException sessionStateException(DutchPaySessionEntity session) {
+        return sessionStateException(session, null);
+    }
+
+    private CustomException sessionStateException(DutchPaySessionEntity session, Throwable cause) {
+        if (session == null || session.getStatus() == null) {
+            return new CustomException(ErrorCode.DUTCH_INVALID_REQUEST, cause);
+        }
+        if (session.getStatus() == DutchPayStatus.COMPLETED) {
+            return new CustomException(ErrorCode.DUTCH_SESSION_ALREADY_COMPLETED, cause);
+        }
+        if (session.getStatus() == DutchPayStatus.FAILED) {
+            return new CustomException(ErrorCode.DUTCH_SESSION_FAILED, cause);
+        }
+        if (session.getStatus() == DutchPayStatus.TIMEOUT_HANDLED) {
+            return new CustomException(ErrorCode.DUTCH_SESSION_TIMEOUT_HANDLED, cause);
+        }
+        return new CustomException(ErrorCode.DUTCH_SESSION_NOT_IN_PROGRESS, cause);
+    }
+
+    private CustomException toParticipantPaymentException(RuntimeException e) {
+        String message = e.getMessage();
+        if (DutchPayParticipantEntity.ERROR_PAYMENT_ALREADY_ASSIGNED.equals(message)) {
+            return new CustomException(ErrorCode.DUTCH_PAYMENT_ALREADY_LINKED, e);
+        }
+        if (DutchPayParticipantEntity.ERROR_AMOUNT_MISMATCH.equals(message)) {
+            return new CustomException(ErrorCode.DUTCH_AMOUNT_MISMATCH, e);
+        }
+        return new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE, e);
+    }
+
     private void applySplitMethod(
             DutchPaySessionEntity session,
             List<DutchPayParticipantEntity> participants,
@@ -727,7 +765,7 @@ public class DutchPayService {
                 .filter(participant -> participant.getStatus() == ParticipantStatus.PENDING)
                 .toList();
         if (payableParticipants.isEmpty()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
         }
 
         long baseAmount = session.getTotal_amount() / payableParticipants.size();
@@ -749,7 +787,7 @@ public class DutchPayService {
         DutchPayParticipantEntity host = participants.stream()
                 .filter(participant -> participant.getUser_id().equals(session.getHost_user_id()))
                 .findFirst()
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
 
         long memberAmountSum = participants.stream()
                 .filter(participant -> !participant.getUser_id().equals(session.getHost_user_id()))
@@ -758,7 +796,7 @@ public class DutchPayService {
                 .filter(amount -> amount != null)
                 .reduce(0L, Long::sum);
         if (memberAmountSum > session.getTotal_amount()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_AMOUNT_MISMATCH);
         }
 
         host.assignAmount(session.getTotal_amount() - memberAmountSum, now);
@@ -797,12 +835,14 @@ public class DutchPayService {
 
             long expiresAtMillis = Long.parseLong(payloadParts[1]);
             if (Instant.now().toEpochMilli() > expiresAtMillis) {
-                throw new IllegalArgumentException("Expired invite token");
+                throw new CustomException(ErrorCode.DUTCH_INVITE_TOKEN_EXPIRED);
             }
 
             return Long.valueOf(payloadParts[0]);
+        } catch (CustomException e) {
+            throw e;
         } catch (RuntimeException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVITE_TOKEN_INVALID, e);
         }
     }
 
@@ -831,7 +871,7 @@ public class DutchPayService {
                     .withoutPadding()
                     .encodeToString(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
-            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e);
         }
     }
 
