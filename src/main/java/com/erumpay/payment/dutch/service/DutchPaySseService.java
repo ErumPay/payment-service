@@ -85,16 +85,16 @@ public class DutchPaySseService {
     // [be] 영은 260523 1220 | SSE 구독 시작 시 요청자가 세션 대표자 또는 참여자인지 검증한다
     private DutchPaySessionDetailResponse getSessionForSse(Long sessionId, Long userId) {
         if (sessionId == null || userId == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
 
         DutchPaySessionEntity session = dutchPaySessionRepository.findById(sessionId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND));
         List<DutchPayParticipantEntity> participants =
                 dutchPayParticipantRepository.findBySessionIdOrderByParticipantId(sessionId);
         if (!session.getHost_user_id().equals(userId)
                 && participants.stream().noneMatch(participant -> participant.getUser_id().equals(userId))) {
-            throw new CustomException(ErrorCode.FORBIDDEN);
+            throw new CustomException(ErrorCode.DUTCH_ACCESS_DENIED);
         }
 
         return DutchPaySessionDetailResponse.fromEntity(session, participants);
@@ -103,7 +103,7 @@ public class DutchPaySseService {
     // [be] 영은 260526 1020 | Redis Pub/Sub 수신 후 최신 DB 상태를 다시 읽어 SSE payload를 만든다
     private DutchPaySessionDetailResponse getSessionForBroadcast(Long sessionId) {
         DutchPaySessionEntity session = dutchPaySessionRepository.findById(sessionId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND));
         List<DutchPayParticipantEntity> participants =
                 dutchPayParticipantRepository.findBySessionIdOrderByParticipantId(sessionId);
 
