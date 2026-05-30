@@ -17,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 import com.erumpay.payment.core.client.auth.AuthClient;
 import com.erumpay.payment.core.client.auth.dto.AuthPinRequest;
 import com.erumpay.payment.core.client.auth.dto.AuthPinResponse;
-import com.erumpay.payment.core.client.card.CardClient;
 import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
 import com.erumpay.payment.core.client.pg.dto.PgPayCancelRequest;
@@ -249,6 +248,7 @@ public class CoreService {
         }
 
         coreValidationService.validateCardAmounts(request);
+
         if (payment.getPayment_type() == CoreEntity.PaymentType.REMOTE) {
             remotePayService.validatePaymentCanBeRequested(payment);
         }
