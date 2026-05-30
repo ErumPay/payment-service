@@ -30,6 +30,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class DutchPayParticipantEntity {
 
+    public static final String ERROR_PAYMENT_ALREADY_ASSIGNED = "Participant payment is already assigned";
+    public static final String ERROR_AMOUNT_MISMATCH = "Participant amount and payment amount must match";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long participant_id;
@@ -167,10 +170,10 @@ public class DutchPayParticipantEntity {
             throw new IllegalStateException("Only pending participant can start payment");
         }
         if (this.payment != null) {
-            throw new IllegalStateException("Participant payment is already assigned");
+            throw new IllegalStateException(ERROR_PAYMENT_ALREADY_ASSIGNED);
         }
         if (this.amount == null || !this.amount.equals(payment.getAmount())) {
-            throw new IllegalArgumentException("Participant amount and payment amount must match");
+            throw new IllegalArgumentException(ERROR_AMOUNT_MISMATCH);
         }
 
         this.payment = payment;

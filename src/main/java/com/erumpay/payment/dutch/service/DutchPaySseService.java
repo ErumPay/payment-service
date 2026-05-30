@@ -79,7 +79,12 @@ public class DutchPaySseService {
             return;
         }
 
-        sendLocalSessionUpdated(sessionId, eventType, getSessionForBroadcast(sessionId));
+        DutchPaySessionDetailResponse session = getSessionForBroadcast(sessionId);
+        if (session == null) {
+            return;
+        }
+
+        sendLocalSessionUpdated(sessionId, eventType, session);
     }
 
     // [be] 영은 260523 1220 | SSE 구독 시작 시 요청자가 세션 대표자 또는 참여자인지 검증한다
@@ -102,8 +107,18 @@ public class DutchPaySseService {
 
     // [be] 영은 260526 1020 | Redis Pub/Sub 수신 후 최신 DB 상태를 다시 읽어 SSE payload를 만든다
     private DutchPaySessionDetailResponse getSessionForBroadcast(Long sessionId) {
+        if (sessionId == null) {
+            log.warn("DutchPay SSE broadcast skipped. session_id is null");
+            return null;
+        }
+
         DutchPaySessionEntity session = dutchPaySessionRepository.findById(sessionId)
-                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND));
+                .orElse(null);
+        if (session == null) {
+            log.warn("DutchPay SSE broadcast skipped. stale session_id={}", sessionId);
+            return null;
+        }
+
         List<DutchPayParticipantEntity> participants =
                 dutchPayParticipantRepository.findBySessionIdOrderByParticipantId(sessionId);
 
