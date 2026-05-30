@@ -56,6 +56,7 @@ auth:
 
 pg:
   base-url: ${PG_BASE_URL}
+  authorization: ${PG_AUTHORIZATION:Bearer server-test-token}
 
 recommend:
   base-url: ${RECOMMEND_BASE_URL}
