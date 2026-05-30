@@ -2,6 +2,7 @@ package com.erumpay.payment.core.service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -19,6 +20,9 @@ import com.erumpay.payment.core.client.auth.dto.AuthPinResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
 import com.erumpay.payment.core.client.pg.dto.PgPayCancelRequest;
+import com.erumpay.payment.core.client.recommend.RecommendClient;
+import com.erumpay.payment.core.client.recommend.dto.RecommendRequest;
+import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
 import com.erumpay.payment.core.dao.CardDetailRepository;
 import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.dto.PrepareRequest;
@@ -48,6 +52,9 @@ import lombok.extern.slf4j.Slf4j;
 public class CoreService {
     private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String PG_STATUS_REJECTED = "REJECTED";
+    private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
+    private static final String RECOMMEND_EVENT_SUCCESS = "카드추천 조합";
+    private static final String RECOMMEND_EVENT_FAILED = "카드추천 실패";
 
     private final PgClient pgClient;
     private final CardDetailRepository cardDetailRepository;
@@ -59,9 +66,11 @@ public class CoreService {
     private final QrService qrService;
     private final RemotePayService remotePayService;
     private final EntityManager entityManager;
+    private final RecommendClient recommendClient;
+    private final CoreSseService coreSseService;
 
     // [be] 다윤 260526 결제 요청 시작 - 개인, 더치페이 대표자
-    public ResponseEntity<PrepareResponse> prepare(Long userId, String idempotencyKey, PrepareRequest request) {
+    public ResponseEntity<PrepareResponse> preparePay(Long userId, String idempotencyKey, PrepareRequest request) {
         log.info("/payment/prepare Service");
 
         String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
@@ -117,13 +126,10 @@ public class CoreService {
                             .order_name(payment.getOrder_name())
                             .build());
 
-            // log.info("dutch session response: {}", dutchResponse);
-
             payment.hostDutchSessionPayment(dutchResponse.getSession_id(), CoreEntity.DutchRole.HOST);
         }
 
-        // [be] 다윤 260528 03:00 | 추천서비스 요청 로직 추가 예정
-
+        requestAndPushRecommendation(payment, userId);
         return ResponseEntity.ok(toPrepareResponse(payment));
     }
 
@@ -143,7 +149,7 @@ public class CoreService {
             return idempotentResponse.get();
         }
 
-        // 더치 세션/참여자/금액을 먼저 검증해 주문 생성 직후 롤백되는 케이스를 줄인다.
+        // [be] 다윤 260529 13:00 | 더치 세션/참여자/금액을 먼저 검증해 주문 생성 직후 롤백되는 케이스를 줄인다.
         dutchPayService.validateParticipantPayment(
                 request.getSessionId(),
                 DutchPayParticipantPaymentValidateRequest.builder()
@@ -154,33 +160,19 @@ public class CoreService {
                         .build());
 
         LocalDateTime now = LocalDateTime.now();
-        CoreEntity payment;
-        try {
-            payment = coreRepository.saveAndFlush(CoreEntity.builder()
-                    .userId(userId)
-                    .merchant_id(request.getMerchantId())
-                    .idempotencyKey(normalizedIdempotencyKey)
-                    .order_no(qrService.generateUniqueOrderNo(now))
-                    .order_name(request.getOrderName())
-                    .amount(request.getAmount())
-                    .payment_status(CoreEntity.PaymentStatus.CREATED)
-                    .payment_type(CoreEntity.PaymentType.DUTCH)
-                    .channel_type(CoreEntity.ChannelType.OFFLINE)
-                    .dutch_role(CoreEntity.DutchRole.MEMBER)
-                    .payment_intent(CoreEntity.PaymentIntent.DUTCH_MEMBER_PAY)
-                    .dutch_session_id(request.getSessionId())
-                    .updated_at(now)
-                    .created_at(now)
-                    .build());
-        } catch (DataIntegrityViolationException e) {
-            // [be] 다윤 260528 00:00 | 경합(race condition) 대응
-            Optional<ResponseEntity<PrepareResponse>> replayed = coreValidationService.validateIdempotency(userId,
-                    normalizedIdempotencyKey);
-            if (replayed.isPresent()) {
-                return replayed.get();
-            }
-            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
+        DutchPaymentSaveOutcome memberSaveOutcome = saveDutchPaymentWithIdempotencyGuard(
+                userId,
+                normalizedIdempotencyKey,
+                request,
+                now,
+                CoreEntity.DutchRole.MEMBER,
+                CoreEntity.PaymentIntent.DUTCH_MEMBER_PAY);
+
+        if (memberSaveOutcome.hasReplayedResponse()) {
+            return memberSaveOutcome.getReplayedResponse();
         }
+
+        CoreEntity payment = memberSaveOutcome.getPayment();
 
         dutchPayService.registerParticipantPayment(
                 request.getSessionId(),
@@ -190,7 +182,7 @@ public class CoreService {
 
         payment.payPendingStatusUpdatePayment(LocalDateTime.now());
 
-        // [be] 다윤 260528 00:00 | 추천서비스 요청 로직 추가 예정
+        requestAndPushRecommendation(payment, userId);
 
         return ResponseEntity.ok(toPrepareResponse(payment));
     }
@@ -210,43 +202,28 @@ public class CoreService {
         }
 
         LocalDateTime now = LocalDateTime.now();
-        CoreEntity payment;
-        try {
-            payment = coreRepository.saveAndFlush(CoreEntity.builder()
-                    .userId(userId)
-                    .merchant_id(request.getMerchantId())
-                    .idempotencyKey(normalizedIdempotencyKey)
-                    .order_no(qrService.generateUniqueOrderNo(now))
-                    .order_name(request.getOrderName())
-                    .amount(request.getAmount())
-                    .payment_status(CoreEntity.PaymentStatus.CREATED)
-                    .payment_type(CoreEntity.PaymentType.DUTCH)
-                    .channel_type(CoreEntity.ChannelType.OFFLINE)
-                    .dutch_role(CoreEntity.DutchRole.HOST)
-                    .payment_intent(CoreEntity.PaymentIntent.DUTCH_HOST_PAY)
-                    .dutch_session_id(request.getSessionId())
-                    .updated_at(now)
-                    .created_at(now)
-                    .build());
-        } catch (DataIntegrityViolationException e) {
-            Optional<ResponseEntity<PrepareResponse>> replayed = coreValidationService.validateIdempotency(userId,
-                    normalizedIdempotencyKey);
-            if (replayed.isPresent()) {
-                return replayed.get();
-            }
-            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
+        DutchPaymentSaveOutcome hostSaveOutcome = saveDutchPaymentWithIdempotencyGuard(
+                userId,
+                normalizedIdempotencyKey,
+                request,
+                now,
+                CoreEntity.DutchRole.HOST,
+                CoreEntity.PaymentIntent.DUTCH_HOST_PAY);
+        if (hostSaveOutcome.hasReplayedResponse()) {
+            return hostSaveOutcome.getReplayedResponse();
         }
+        CoreEntity payment = hostSaveOutcome.getPayment();
 
         payment.payPendingStatusUpdatePayment(LocalDateTime.now());
 
-        // [be] 다윤 260528 03:00 | 추천서비스 요청 로직 추가 예정
+        requestAndPushRecommendation(payment, userId);
 
         return ResponseEntity.ok(toPrepareResponse(payment));
     }
 
     // [be] 다윤 260526 비밀번호 확인 및 실결제 요청
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public ResponseEntity<PinAndPayResponse> request(Long userId, String idempotencyKey, PinAndPayRequest request) {
+    public ResponseEntity<PinAndPayResponse> requestPay(Long userId, String idempotencyKey, PinAndPayRequest request) {
 
         log.info("/payment/request Service");
 
@@ -271,6 +248,7 @@ public class CoreService {
         }
 
         coreValidationService.validateCardAmounts(request);
+
         if (payment.getPayment_type() == CoreEntity.PaymentType.REMOTE) {
             remotePayService.validatePaymentCanBeRequested(payment);
         }
@@ -321,7 +299,7 @@ public class CoreService {
     }
 
     // [be] 다윤 260527 일반 결제 취소
-    public CanceledResponse cancel(Long userId, String idempotencyKey, Long paymentId) {
+    public CanceledResponse cancelPay(Long userId, String idempotencyKey, Long paymentId) {
 
         log.info("/payment/cancel Service");
         String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
@@ -402,12 +380,118 @@ public class CoreService {
         return PrepareResponse.builder()
                 .paymentId(payment.getPaymentId())
                 .paymentStatus(payment.getPayment_status() == null ? null : payment.getPayment_status().name())
+                .recommendationStatus(RECOMMENDATION_STATUS_PENDING)
                 .paymentType(payment.getPayment_type() == null ? null : payment.getPayment_type().name())
                 .paymentIntent(payment.getPayment_intent() == null ? null : payment.getPayment_intent().name())
                 .dutchRole(payment.getDutch_role() == null ? null : payment.getDutch_role().name())
                 .dutchSessionId(payment.getDutch_session_id())
                 .amount(payment.getAmount())
                 .build();
+    }
+
+    private DutchPaymentSaveOutcome saveDutchPaymentWithIdempotencyGuard(
+            Long userId,
+            String normalizedIdempotencyKey,
+            DutchMemberPrepareRequest request,
+            LocalDateTime now,
+            CoreEntity.DutchRole dutchRole,
+            CoreEntity.PaymentIntent paymentIntent) {
+        try {
+            CoreEntity payment = coreRepository.saveAndFlush(CoreEntity.builder()
+                    .userId(userId)
+                    .merchant_id(request.getMerchantId())
+                    .idempotencyKey(normalizedIdempotencyKey)
+                    .order_no(qrService.generateUniqueOrderNo(now))
+                    .order_name(request.getOrderName())
+                    .amount(request.getAmount())
+                    .payment_status(CoreEntity.PaymentStatus.CREATED)
+                    .payment_type(CoreEntity.PaymentType.DUTCH)
+                    .channel_type(CoreEntity.ChannelType.OFFLINE)
+                    .dutch_role(dutchRole)
+                    .payment_intent(paymentIntent)
+                    .dutch_session_id(request.getSessionId())
+                    .updated_at(now)
+                    .created_at(now)
+                    .build());
+
+            return DutchPaymentSaveOutcome.saved(payment);
+        } catch (DataIntegrityViolationException e) {
+            Optional<ResponseEntity<PrepareResponse>> replayed = coreValidationService.validateIdempotency(userId,
+                    normalizedIdempotencyKey);
+            if (replayed.isPresent()) {
+                return DutchPaymentSaveOutcome.replayed(replayed.get());
+            }
+            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
+        }
+    }
+
+    // [be] 다윤 260529 13:00 | 결제 카드추천 조합 요청
+    private void requestAndPushRecommendation(CoreEntity payment, Long userId) {
+        try {
+            RecommendResponse recommendList = recommendClient.recommentListRequest(
+                    RecommendRequest.builder()
+                            .paymentId(payment.getPaymentId())
+                            .userId(userId)
+                            // .merchantName(payment.getMerchant_name())
+                            .merchantName("스타벅스 강남점")
+                            .mccCode("5811")
+                            .amount(payment.getAmount())
+                            .build());
+
+            if (recommendList == null || recommendList.getResults() == null) {
+                log.warn("recommend response is empty. paymentId={}, userId={}", payment.getPaymentId(), userId);
+                return;
+            }
+
+            log.info("recommend list response: {}", recommendList);
+            coreSseService.pushEvent(payment.getPaymentId(), RECOMMEND_EVENT_SUCCESS, recommendList);
+        } catch (FeignException e) {
+            log.error("recommend feign error. paymentId={}, userId={}, status={}, body={}",
+                    payment.getPaymentId(), userId, e.status(), e.contentUTF8());
+            pushRecommendFailedEvent(payment.getPaymentId(), e.status(), "추천 서비스 호출 실패");
+        } catch (Exception e) {
+            log.error("recommend request unexpected error. paymentId={}, userId={}",
+                    payment.getPaymentId(), userId, e);
+            pushRecommendFailedEvent(payment.getPaymentId(), 500, "추천 처리 중 오류");
+        }
+    }
+
+    private void pushRecommendFailedEvent(Long paymentId, int status, String reason) {
+        coreSseService.pushEvent(paymentId, RECOMMEND_EVENT_FAILED, Map.of(
+                "paymentId", paymentId,
+                "eventType", "RECOMMENDATION_FAILED",
+                "status", status,
+                "reason", reason));
+    }
+
+    private static final class DutchPaymentSaveOutcome {
+        private final CoreEntity payment;
+        private final ResponseEntity<PrepareResponse> replayedResponse;
+
+        private DutchPaymentSaveOutcome(CoreEntity payment, ResponseEntity<PrepareResponse> replayedResponse) {
+            this.payment = payment;
+            this.replayedResponse = replayedResponse;
+        }
+
+        private static DutchPaymentSaveOutcome saved(CoreEntity payment) {
+            return new DutchPaymentSaveOutcome(payment, null);
+        }
+
+        private static DutchPaymentSaveOutcome replayed(ResponseEntity<PrepareResponse> replayedResponse) {
+            return new DutchPaymentSaveOutcome(null, replayedResponse);
+        }
+
+        private CoreEntity getPayment() {
+            return payment;
+        }
+
+        private ResponseEntity<PrepareResponse> getReplayedResponse() {
+            return replayedResponse;
+        }
+
+        private boolean hasReplayedResponse() {
+            return replayedResponse != null;
+        }
     }
 
     // [be] 다윤 260522 SSE 연결 가능 여부 판단

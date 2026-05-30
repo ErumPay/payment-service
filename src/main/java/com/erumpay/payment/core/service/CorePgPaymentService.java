@@ -2,6 +2,8 @@ package com.erumpay.payment.core.service;
 
 import org.springframework.stereotype.Service;
 
+import com.erumpay.payment.core.client.card.CardClient;
+import com.erumpay.payment.core.client.card.dto.CardBillingKeyResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
@@ -22,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class CorePgPaymentService {
 
+    private final CoreSseService coreSseService;
     private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String PG_STATUS_APPROVED = "APPROVED";
     private static final String PG_STATUS_REJECTED = "REJECTED";
@@ -32,8 +35,8 @@ public class CorePgPaymentService {
     private final PgClient pgClient;
     private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
     private final DutchPayService dutchPayService;
+    private final CardClient cardClient;
 
-    // [be] 다윤 260526 pg-payment-service 실결제 요청
     public void requestPgPayments(CoreEntity payment, PinAndPayRequest request) {
 
         String savedIdempotencyKey = payment.getIdempotencyKey();
@@ -42,13 +45,18 @@ public class CorePgPaymentService {
         }
 
         boolean useAuthOnly = shouldUseAuthOnly(payment);
+        coreSseService.pushEvent(payment.getPaymentId(), "결제 요청 중", "PENDING");
 
         // [be] 다윤 260527 단일 카드 결제 요청만 강제
         for (PinAndPayRequest.CardPortion card : request.getCards()) {
+
+            // [be] 다윤 260529 billing-key 조회
+            CardBillingKeyResponse billingKey = fetchBillingKeyOrThrow(payment, card);
+
             PgAuthPayRequest pgAuthRequest = PgAuthPayRequest.builder()
                     .payPaymentId(payment.getPaymentId())
                     .merchantId(payment.getMerchant_id())
-                    .billingKey("c1ed854b963e4386abf7cbc592e43141")
+                    .billingKey(billingKey.getBillingKey())
                     .originalAmount(payment.getAmount())
                     .approvedAmount(card.getAmount())
                     .build();
@@ -79,6 +87,7 @@ public class CorePgPaymentService {
             if (pgResponse == null || pgResponse.getStatus() == null) {
                 corePgPaymentPersistenceService.markFailedAndSaveEvent(payment.getPaymentId(), pgResponse);
                 notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, pgResponse);
+                coreSseService.pushEvent(payment.getPaymentId(), "결제실패", "FAILED");
                 throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
             }
             String pgStatus = pgResponse.getStatus();
@@ -87,9 +96,13 @@ public class CorePgPaymentService {
                 if (useAuthOnly) {
                     corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
                     notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
+                    coreSseService.pushEvent(payment.getPaymentId(), "결제성공", "PAID");
+                    coreSseService.completeSubscriptions(payment.getPaymentId());
                 } else {
                     corePgPaymentPersistenceService.markPaidAndSaveEvent(payment.getPaymentId(), pgResponse);
                     notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
+                    coreSseService.pushEvent(payment.getPaymentId(), "결제성공", "PAID");
+                    coreSseService.completeSubscriptions(payment.getPaymentId());
                 }
                 // [be] 다윤 260528 00:00 | cardDetails 추가 예정
                 continue;
@@ -104,6 +117,59 @@ public class CorePgPaymentService {
 
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
+    }
+
+    private CardBillingKeyResponse fetchBillingKeyOrThrow(
+            CoreEntity payment,
+            PinAndPayRequest.CardPortion card) {
+        try {
+            CardBillingKeyResponse billingKey = cardClient.billingKeyLookUp(card.getCardId(), payment.getUserId());
+
+            if (billingKey == null || billingKey.getBillingKey() == null || billingKey.getBillingKey().isBlank()) {
+                log.error("card billing-key is empty. paymentId={}, cardId={}, userId={}",
+                        payment.getPaymentId(), card.getCardId(), payment.getUserId());
+
+                throw new CustomException(ErrorCode.CARD_BILLING_KEY_INVALID);
+            }
+            return billingKey;
+        } catch (FeignException e) {
+            ErrorCode mappedError = mapCardBillingKeyError(e.status());
+            log.error(
+                    "card billing-key feign error. paymentId={}, cardId={}, userId={}, status={}, mappedError={}, body={}",
+                    payment.getPaymentId(),
+                    card.getCardId(),
+                    payment.getUserId(),
+                    e.status(),
+                    mappedError.name(),
+                    trimForLog(e.contentUTF8()));
+
+            throw new CustomException(mappedError, e);
+        } catch (CustomException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("card billing-key unexpected error. paymentId={}, cardId={}, userId={}",
+                    payment.getPaymentId(), card.getCardId(), payment.getUserId(), e);
+
+            throw new CustomException(ErrorCode.INTERNAL_CARD_SERVER_ERROR, e);
+        }
+    }
+
+    private ErrorCode mapCardBillingKeyError(int status) {
+        return switch (status) {
+            case 400, 422 -> ErrorCode.CARD_BILLING_KEY_INVALID;
+            case 401, 403 -> ErrorCode.CARD_BILLING_KEY_FORBIDDEN;
+            case 404 -> ErrorCode.CARD_BILLING_KEY_NOT_FOUND;
+            default -> ErrorCode.INTERNAL_CARD_SERVER_ERROR;
+        };
+    }
+
+    private String trimForLog(String body) {
+        if (body == null) {
+            return "";
+        }
+
+        int maxLen = 500;
+        return body.length() <= maxLen ? body : body.substring(0, maxLen) + "...";
     }
 
     private boolean shouldUseAuthOnly(CoreEntity payment) {
