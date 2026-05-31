@@ -11,6 +11,7 @@ public enum ErrorCode {
 
     // Core / QR / authentication
     BAD_REQUEST(HttpStatus.BAD_REQUEST, "PAY-CORE-001", "CORE_INVALID_REQUEST", "잘못된 요청입니다."),
+    INVALID_IDEMPOTENCY_KEY(HttpStatus.BAD_REQUEST, "PAY-CORE-003", "PAYMENT_IDEMPOTENCY_KEY_INVALID", "잘못된 멱등성키입니다."),
     QR_INVALID(HttpStatus.BAD_REQUEST, "PAY-QR-001", "QR_INVALID_TOKEN", "유효하지 않은 QR 토큰입니다."),
     PIN_INVALID(HttpStatus.BAD_REQUEST, "PAY-AUTH-001", "PIN_INVALID", "잘못된 비밀번호입니다."),
     AMOUNT_MISMATCH(HttpStatus.BAD_REQUEST, "PAY-CORE-002", "PAYMENT_AMOUNT_MISMATCH", "잘못된 금액 요청입니다."),
