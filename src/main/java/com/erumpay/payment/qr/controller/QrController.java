@@ -12,6 +12,7 @@ import com.erumpay.payment.qr.domain.dto.QrResponse;
 import com.erumpay.payment.qr.domain.dto.QrValidateRequest;
 import com.erumpay.payment.qr.service.QrService;
 
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 @RestController
 @Slf4j
 @RequiredArgsConstructor
+@Tag(name = "Core Payment", description = "QR 생성 API")
 public class QrController {
 
     private final QrService qrService;
