@@ -4,6 +4,7 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -20,6 +21,9 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class CoreValidationService {
+
+    // private static final Pattern IDEMPOTENCY_KEY_PATTERN = Pattern.compile(
+    // "^pay:(payment|cancel):[1-9]\\d*:[0-9A-HJKMNP-TV-Z]{26}$");
 
     private final CoreRepository coreRepository;
 
@@ -51,6 +55,18 @@ public class CoreValidationService {
 
         throw new CustomException(ErrorCode.REQUEST_IN_PROGRESS);
     }
+
+    // public String normalizeIdempotencyKey(String idempotencyKey) {
+    // if (idempotencyKey == null || idempotencyKey.isBlank()) {
+    // throw new CustomException(ErrorCode.INVALID_IDEMPOTENCY_KEY);
+    // }
+
+    // String normalized = idempotencyKey.trim();
+    // if (!IDEMPOTENCY_KEY_PATTERN.matcher(normalized).matches()) {
+    // throw new CustomException(ErrorCode.INVALID_IDEMPOTENCY_KEY);
+    // }
+    // return normalized;
+    // }
 
     public String normalizeIdempotencyKey(String idempotencyKey) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
