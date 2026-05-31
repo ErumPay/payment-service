@@ -38,12 +38,15 @@ public class CoreSwaggerConfig {
                         return;
                     }
 
-                    openApi.getPaths().values().forEach(pathItem -> {
+                    openApi.getPaths().forEach((path, pathItem) -> {
+                        boolean isQrApi = path.startsWith("/api/v1/payment/qr/");
                         pathItem.readOperationsMap().forEach((httpMethod, operation) -> {
-                            addUserIdHeader(operation);
+                            if (!isQrApi) {
+                                addUserIdHeader(operation);
 
-                            if (PathItem.HttpMethod.POST.equals(httpMethod)) {
-                                addIdempotencyKeyHeader(operation);
+                                if (PathItem.HttpMethod.POST.equals(httpMethod)) {
+                                    addIdempotencyKeyHeader(operation);
+                                }
                             }
                         });
                     });
