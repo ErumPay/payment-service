@@ -131,7 +131,6 @@ public class DutchPayService {
         DutchPayParticipantEntity participant = dutchPayParticipantRepository
                 .findParticipantForPaymentValidation(
                         sessionId,
-                        request.getParticipant_id(),
                         request.getUser_id())
                 .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
         if (participant.getStatus() != ParticipantStatus.PENDING
@@ -145,7 +144,6 @@ public class DutchPayService {
 
         return DutchPayParticipantPaymentValidateResponse.valid(
                 sessionId,
-                participant.getParticipant_id(),
                 participant.getUser_id(),
                 participant.getAmount(),
                 participant.getStatus().name());
@@ -155,11 +153,9 @@ public class DutchPayService {
     @Transactional
     public void registerParticipantPayment(
             Long sessionId,
-            Long participantId,
             Long userId,
             CoreEntity payment) {
         if (sessionId == null
-                || participantId == null
                 || userId == null
                 || payment == null
                 || payment.getPaymentId() == null) {
@@ -170,7 +166,7 @@ public class DutchPayService {
         ensureInProgress(session);
 
         DutchPayParticipantEntity participant = dutchPayParticipantRepository
-                .findParticipantForPaymentUpdate(sessionId, participantId, userId)
+                .findParticipantForPaymentUpdate(sessionId, userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
         if (userId.equals(session.getHost_user_id())) {
             throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
@@ -593,7 +589,6 @@ public class DutchPayService {
             DutchPayParticipantPaymentValidateRequest request) {
         if (sessionId == null
                 || request == null
-                || request.getParticipant_id() == null
                 || request.getUser_id() == null
                 || request.getAmount() == null
                 || request.getAmount() <= 0) {
