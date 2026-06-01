@@ -7,13 +7,6 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/**
- * 더치페이 세션 생성 응답 DTO.
- *
- * <p>Core가 대표자 가승인 결제 준비를 끝낸 뒤 더치페이 세션을 만들 때 받는 응답이다.
- * {@code host_auth_payment_id}는 대표자 auth-only 결제의 payment_id이며,
- * 이후 세션 완료 또는 타임아웃 정산 시 void 대상이 될 수 있다.</p>
- */
 @Builder
 @Getter
 @AllArgsConstructor

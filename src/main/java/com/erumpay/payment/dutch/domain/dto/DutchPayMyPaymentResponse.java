@@ -6,12 +6,6 @@ import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity;
 import lombok.Builder;
 import lombok.Getter;
 
-/**
- * 현재 사용자의 더치페이 결제 가능 여부 응답 DTO.
- *
- * <p>참여자가 결제 화면에 진입하기 전에 본인 부담 금액, 세션 상태,
- * 기존 payment_id 연결 여부를 확인하는 데 사용한다.</p>
- */
 @Builder
 @Getter
 public class DutchPayMyPaymentResponse {
