@@ -14,31 +14,27 @@ import com.erumpay.payment.dutch.domain.entity.DutchPayParticipantEntity;
 
 public interface DutchPayParticipantRepository extends JpaRepository<DutchPayParticipantEntity, Long> {
 
-    // [be] 영은 260523 1120 | Core 참여자 결제 검증 시 session/participant/user 조합이 맞는지 조회한다.
+    // [be] 영은 260601 | Core는 더치 내부 participant_id를 보관하지 않으므로 session/user 조합으로 참여자 row를 조회한다.
     @Query("""
             select p
             from DutchPayParticipantEntity p
-            where p.participant_id = :participantId
-              and p.session.session_id = :sessionId
+            where p.session.session_id = :sessionId
               and p.user_id = :userId
             """)
     Optional<DutchPayParticipantEntity> findParticipantForPaymentValidation(
             @Param("sessionId") Long sessionId,
-            @Param("participantId") Long participantId,
             @Param("userId") Long userId);
 
-    // [be] 영은 260526 1620 | 참여자 결제 주문 생성 중 같은 참여자 row를 잠가 중복 병렬 결제를 막는다.
+    // [be] 영은 260601 | 참여자 결제 주문 생성 중 같은 session/user row를 잠가 중복 병렬 결제를 막는다.
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select p
             from DutchPayParticipantEntity p
-            where p.participant_id = :participantId
-              and p.session.session_id = :sessionId
+            where p.session.session_id = :sessionId
               and p.user_id = :userId
             """)
     Optional<DutchPayParticipantEntity> findParticipantForPaymentUpdate(
             @Param("sessionId") Long sessionId,
-            @Param("participantId") Long participantId,
             @Param("userId") Long userId);
 
     // [be] 영은 260528 1720 | Core 결제 완료 콜백은 participant_id를 보관하지 않으므로 payment_id로 참여자 row를 잠금 조회한다.
