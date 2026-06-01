@@ -109,7 +109,6 @@ public class CorePgPaymentService {
                             payment.getPaymentId(),
                             CoreSseEventType.PAYMENT_PAID,
                             Map.of("status", "PAID"));
-                    coreSseService.completeSubscriptions(payment.getPaymentId());
                 } else {
                     corePgPaymentPersistenceService.markPaidAndSaveEvent(payment.getPaymentId(), pgResponse);
                     notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
@@ -117,7 +116,6 @@ public class CorePgPaymentService {
                             payment.getPaymentId(),
                             CoreSseEventType.PAYMENT_PAID,
                             Map.of("status", "PAID"));
-                    coreSseService.completeSubscriptions(payment.getPaymentId());
                 }
                 // [be] 다윤 260528 00:00 | cardDetails 추가 예정
                 continue;

@@ -87,14 +87,18 @@ public class CoreSseService {
         }
     }
 
-    // [be] codex 260601 | Redis에서 전달된 코어 SSE 이벤트를 현재 인스턴스의 로컬 SSE 연결에 전송한다.
+    // [be] 다윤 260601 | Redis에서 전달된 코어 SSE 이벤트를 현재 인스턴스의 로컬 SSE 연결에 전송한다.
     public void applyPaymentUpdatedFromRedis(Long paymentId, CoreSseEventResponse event) {
         log.info("applyPaymentUpdatedFromRedis called.");
         cacheRecommendationEventIfNeeded(paymentId, event);
         sendLocalPaymentUpdated(paymentId, event);
+
+        if (shouldCompleteSubscriptions(event)) {
+            completeSubscriptions(paymentId);
+        }
     }
 
-    // [be] codex 260601 | 현재 인스턴스에 연결된 구독자에게만 payment-updated 이벤트를 보낸다.
+    // [be] 다윤 260601 | 현재 인스턴스에 연결된 구독자에게만 payment-updated 이벤트를 보낸다.
     public void sendLocalPaymentUpdated(Long paymentId, CoreSseEventResponse event) {
         log.info("sendLocalPaymentUpdated called.");
         List<SseEmitter> emitterList = emitters.get(paymentId);
@@ -114,7 +118,7 @@ public class CoreSseService {
         }
     }
 
-    // [be] codex 260529 | 결제 완료 후 해당 paymentId에 연결된 SSE 구독을 종료한다.
+    // [be] 다윤 260529 | 결제 완료 후 해당 paymentId에 연결된 SSE 구독을 종료한다.
     public void completeSubscriptions(Long paymentId) {
         List<SseEmitter> emitterList = emitters.remove(paymentId);
         if (emitterList == null || emitterList.isEmpty()) {
@@ -169,6 +173,10 @@ public class CoreSseService {
     private boolean isRecommendationEvent(CoreSseEventType eventType) {
         return eventType == CoreSseEventType.RECOMMENDATION_SUCCEEDED
                 || eventType == CoreSseEventType.RECOMMENDATION_FAILED;
+    }
+
+    private boolean shouldCompleteSubscriptions(CoreSseEventResponse event) {
+        return event != null && event.getEventType() == CoreSseEventType.PAYMENT_PAID;
     }
 
     private void removeEmitter(Long paymentId, SseEmitter emitter) {
