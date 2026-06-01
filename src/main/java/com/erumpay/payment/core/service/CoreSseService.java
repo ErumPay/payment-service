@@ -6,8 +6,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -168,6 +170,13 @@ public class CoreSseService {
             emitter.completeWithError(e);
             removeEmitter(paymentId, emitter);
         }
+    }
+
+    @Scheduled(fixedDelay = 1, timeUnit = TimeUnit.MINUTES)
+    void cleanupExpiredRecommendationEvents() {
+        long now = System.currentTimeMillis();
+        recommendationEvents.entrySet().removeIf(
+                entry -> now - entry.getValue().createdAtMs() > RECOMMENDATION_CACHE_TTL_MS);
     }
 
     private boolean isRecommendationEvent(CoreSseEventType eventType) {

@@ -3,10 +3,10 @@ package com.erumpay.payment.core.config;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import com.erumpay.payment.core.service.CoreSseRedisSubscriber;
 import com.erumpay.payment.core.service.CoreSseTopicProperties;
@@ -31,13 +31,16 @@ public class CorePayRedisConfig {
     @Bean
     public RedisMessageListenerContainer corePayRedisMessageListenerContainer(
             RedisConnectionFactory redisConnectionFactory,
-            @Qualifier("corePayEventTopic") ChannelTopic corePayEventTopic,
+            @Qualifier("corePayEventTopic")
+            ChannelTopic corePayEventTopic,
+            @Qualifier("redisListenerTaskExecutor")
+            ThreadPoolTaskExecutor redisListenerTaskExecutor,
             CoreSseRedisSubscriber coreSseRedisSubscriber) {
 
         log.info("RedisMessageListenerContainer corePayRedisMessageListenerContainer called.");
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(redisConnectionFactory);
-        container.setTaskExecutor(new SimpleAsyncTaskExecutor("core-pay-redis-listener-"));
+        container.setTaskExecutor(redisListenerTaskExecutor);
         container.setErrorHandler(error -> log.warn("CorePay Redis listener error", error));
         container.setRecoveryInterval(5000L);
         container.addMessageListener(coreSseRedisSubscriber, corePayEventTopic);
