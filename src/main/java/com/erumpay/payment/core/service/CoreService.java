@@ -31,6 +31,7 @@ import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.DutchMemberPrepareRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
 import com.erumpay.payment.core.domain.dto.CanceledResponse;
+import com.erumpay.payment.core.domain.dto.CoreSseEventType;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
@@ -53,9 +54,6 @@ public class CoreService {
     private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String PG_STATUS_REJECTED = "REJECTED";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
-    private static final String RECOMMEND_EVENT_SUCCESS = "카드추천 조합";
-    private static final String RECOMMEND_EVENT_FAILED = "카드추천 실패";
-
     private final PgClient pgClient;
     private final CardDetailRepository cardDetailRepository;
     private final CoreRepository coreRepository;
@@ -444,7 +442,10 @@ public class CoreService {
             }
 
             log.info("recommend list response: {}", recommendList);
-            coreSseService.pushEvent(payment.getPaymentId(), RECOMMEND_EVENT_SUCCESS, recommendList);
+            coreSseService.publishPaymentUpdated(
+                    payment.getPaymentId(),
+                    CoreSseEventType.RECOMMENDATION_SUCCEEDED,
+                    recommendList);
         } catch (FeignException e) {
             log.error("recommend feign error. paymentId={}, userId={}, status={}, body={}",
                     payment.getPaymentId(), userId, e.status(), e.contentUTF8());
@@ -457,11 +458,13 @@ public class CoreService {
     }
 
     private void pushRecommendFailedEvent(Long paymentId, int status, String reason) {
-        coreSseService.pushEvent(paymentId, RECOMMEND_EVENT_FAILED, Map.of(
-                "paymentId", paymentId,
-                "eventType", "RECOMMENDATION_FAILED",
-                "status", status,
-                "reason", reason));
+        coreSseService.publishPaymentUpdated(
+                paymentId,
+                CoreSseEventType.RECOMMENDATION_FAILED,
+                Map.of(
+                        "paymentId", paymentId,
+                        "status", status,
+                        "reason", reason));
     }
 
     private static final class DutchPaymentSaveOutcome {
