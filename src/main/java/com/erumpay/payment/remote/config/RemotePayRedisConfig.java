@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
-import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import com.erumpay.payment.remote.service.RemotePaySseRedisSubscriber;
 import com.erumpay.payment.remote.service.RemotePaySseTopicProperties;
@@ -33,10 +33,12 @@ public class RemotePayRedisConfig {
             RedisConnectionFactory redisConnectionFactory,
             @Qualifier("remotePayRequestEventTopic")
             ChannelTopic remotePayRequestEventTopic,
+            @Qualifier("redisListenerTaskExecutor")
+            ThreadPoolTaskExecutor redisListenerTaskExecutor,
             RemotePaySseRedisSubscriber remotePaySseRedisSubscriber) {
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(redisConnectionFactory);
-        container.setTaskExecutor(new SimpleAsyncTaskExecutor("remote-pay-redis-listener-"));
+        container.setTaskExecutor(redisListenerTaskExecutor);
         container.setErrorHandler(error -> log.warn("RemotePay Redis listener error", error));
         container.setRecoveryInterval(5000L);
         container.addMessageListener(remotePaySseRedisSubscriber, remotePayRequestEventTopic);
