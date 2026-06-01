@@ -81,7 +81,7 @@ public class CoreController {
 
     // [be] 다윤 260526 결제 SSE 연결
     @GetMapping("/{paymentId}/subscribe")
-    @Operation(summary = "결제 상태 SSE 구독", description = "결제 상태 변경 이벤트를 SSE로 구독한다.")
+    @Operation(summary = "결제 상태 SSE 구독", description = "결제 상태 변경 이벤트를 SSE로 구독한다. 이벤트명은 connected/payment-updated를 사용한다.")
     public SseEmitter sseStream(
             @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
             @Parameter(description = "결제 ID", required = true) @PathVariable("paymentId") Long paymentId) {

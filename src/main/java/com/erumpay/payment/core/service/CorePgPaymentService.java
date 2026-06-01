@@ -1,5 +1,7 @@
 package com.erumpay.payment.core.service;
 
+import java.util.Map;
+
 import org.springframework.stereotype.Service;
 
 import com.erumpay.payment.core.client.card.CardClient;
@@ -7,6 +9,7 @@ import com.erumpay.payment.core.client.card.dto.CardBillingKeyResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
+import com.erumpay.payment.core.domain.dto.CoreSseEventType;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
@@ -45,7 +48,10 @@ public class CorePgPaymentService {
         }
 
         boolean useAuthOnly = shouldUseAuthOnly(payment);
-        coreSseService.pushEvent(payment.getPaymentId(), "결제 요청 중", "PENDING");
+        coreSseService.publishPaymentUpdated(
+                payment.getPaymentId(),
+                CoreSseEventType.PAYMENT_PENDING,
+                Map.of("status", "PENDING"));
 
         // [be] 다윤 260527 단일 카드 결제 요청만 강제
         for (PinAndPayRequest.CardPortion card : request.getCards()) {
@@ -87,7 +93,10 @@ public class CorePgPaymentService {
             if (pgResponse == null || pgResponse.getStatus() == null) {
                 corePgPaymentPersistenceService.markFailedAndSaveEvent(payment.getPaymentId(), pgResponse);
                 notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, pgResponse);
-                coreSseService.pushEvent(payment.getPaymentId(), "결제실패", "FAILED");
+                coreSseService.publishPaymentUpdated(
+                        payment.getPaymentId(),
+                        CoreSseEventType.PAYMENT_FAILED,
+                        Map.of("status", "FAILED"));
                 throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
             }
             String pgStatus = pgResponse.getStatus();
@@ -96,12 +105,18 @@ public class CorePgPaymentService {
                 if (useAuthOnly) {
                     corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
                     notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
-                    coreSseService.pushEvent(payment.getPaymentId(), "결제성공", "PAID");
+                    coreSseService.publishPaymentUpdated(
+                            payment.getPaymentId(),
+                            CoreSseEventType.PAYMENT_PAID,
+                            Map.of("status", "PAID"));
                     coreSseService.completeSubscriptions(payment.getPaymentId());
                 } else {
                     corePgPaymentPersistenceService.markPaidAndSaveEvent(payment.getPaymentId(), pgResponse);
                     notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
-                    coreSseService.pushEvent(payment.getPaymentId(), "결제성공", "PAID");
+                    coreSseService.publishPaymentUpdated(
+                            payment.getPaymentId(),
+                            CoreSseEventType.PAYMENT_PAID,
+                            Map.of("status", "PAID"));
                     coreSseService.completeSubscriptions(payment.getPaymentId());
                 }
                 // [be] 다윤 260528 00:00 | cardDetails 추가 예정
