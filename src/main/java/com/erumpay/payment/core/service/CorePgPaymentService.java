@@ -150,7 +150,6 @@ public class CorePgPaymentService {
             PgAuthPayResponse pgResponse,
             PinAndPayRequest.CardPortion card,
             CardBillingKeyResponse billingKey) {
-
         if (useAuthOnly) {
             corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
             notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
@@ -284,7 +283,14 @@ public class CorePgPaymentService {
 
         Long paidAmount = pgResponse.getAmount();
         if (paidAmount == null) {
-            paidAmount = -1L;
+            paidAmount = card.getAmount();
+        }
+        if (paidAmount == null) {
+            log.warn("paid amount is missing. fallback to 0. paymentId={}, pgTxnId={}, cardId={}",
+                    payment.getPaymentId(),
+                    pgResponse.getPgTxnId(),
+                    card.getCardId());
+            paidAmount = 0L;
         }
 
         LocalDateTime paidAt = pgResponse.getApprovedAt() == null ? LocalDateTime.now() : pgResponse.getApprovedAt();

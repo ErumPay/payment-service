@@ -11,4 +11,7 @@ import com.erumpay.payment.core.domain.entity.CardDetailEntity;
 public interface CardDetailRepository extends JpaRepository<CardDetailEntity, Long> {
     @Query("select c from CardDetailEntity c where c.payment_id = :paymentId and c.pg_txn_id is not null")
     List<CardDetailEntity> findCancelableCardsByPaymentId(@Param("paymentId") Long paymentId);
+
+    @Query("select count(c) > 0 from CardDetailEntity c where c.payment_id = :paymentId and c.pg_txn_id = :pgTxnId")
+    boolean existsByPaymentIdAndPgTxnId(@Param("paymentId") Long paymentId, @Param("pgTxnId") Long pgTxnId);
 }

@@ -70,6 +70,14 @@ public class CorePgPaymentPersistenceService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void savePaidCardDetail(PaidCardRequest paidCard) {
+        if (paidCard == null || paidCard.getPaymentId() == null || paidCard.getPgTxnId() == null) {
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+
+        if (cardDetailRepository.existsByPaymentIdAndPgTxnId(paidCard.getPaymentId(), paidCard.getPgTxnId())) {
+            return;
+        }
+
         cardDetailRepository.save(toCardDetailEntity(paidCard));
     }
 
