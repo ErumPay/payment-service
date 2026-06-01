@@ -37,7 +37,6 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayInviteLinkResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayMyPaymentResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequest;
-import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantsConfirmRequest;
@@ -66,9 +65,6 @@ public class DutchPayService {
     private static final Duration TIMEOUT_AFTER = Duration.ofMinutes(30);
     private static final String INVITE_TOKEN_HMAC_ALGORITHM = "HmacSHA256";
     private static final String DEFAULT_INVITE_TOKEN_SECRET = "erumpay-local-dutch-invite-token-secret";
-    private static final String HOST_AUTH_VOID_IDEMPOTENCY_PREFIX = "dutch-host-auth-void";
-    private static final String HOST_AUTH_VOID_REASON_COMPLETED = "DUTCH_COMPLETED";
-    private static final String HOST_AUTH_VOID_REASON_TIMEOUT = "DUTCH_TIMEOUT";
 
     private final DutchPaySessionRepository dutchPaySessionRepository;
     private final DutchPayParticipantRepository dutchPayParticipantRepository;
@@ -182,7 +178,7 @@ public class DutchPayService {
 
     // [be] 영은 260526 1620 | 참여자 결제 완료 이벤트를 반영하고 모든 참여자가 결제하면 세션을 완료 처리한다
     @Transactional
-    public DutchPayParticipantPaymentResultResponse applyParticipantPaymentResult(
+    public DutchPaySessionDetailResponse applyParticipantPaymentResult(
             Long sessionId,
             DutchPayParticipantPaymentResultRequest request) {
         validateParticipantPaymentResultRequest(sessionId, request);
@@ -207,19 +203,15 @@ public class DutchPayService {
         }
 
         List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
-        boolean completed = false;
         if (allPayableMembersPaid(session, participants)) {
             session.complete(LocalDateTime.now());
-            completed = true;
         }
 
-        DutchPaySessionDetailResponse detail = publishAndReturn(
+        return publishAndReturn(
                 sessionId,
-                completed
+                session.getStatus() == DutchPayStatus.COMPLETED
                         ? "SESSION_COMPLETED"
                         : "PARTICIPANT_PAYMENT_PAID");
-
-        return toParticipantPaymentResultResponse(session, detail, completed);
     }
 
     @Transactional
@@ -531,12 +523,6 @@ public class DutchPayService {
         return DutchPayTimeoutBatchResponse.TimeoutHandledSession.builder()
                 .session_id(session.getSession_id())
                 .host_user_id(session.getHost_user_id())
-                .host_auth_payment_id_to_void(session.getHost_auth_payment_id())
-                .host_auth_void_idempotency_key(buildHostAuthVoidIdempotencyKey(
-                        session.getSession_id(),
-                        session.getHost_auth_payment_id(),
-                        HOST_AUTH_VOID_REASON_TIMEOUT))
-                .host_auth_void_reason(HOST_AUTH_VOID_REASON_TIMEOUT)
                 .host_final_amount(hostFinalAmount)
                 .host_final_payment_required(hostFinalAmount > 0)
                 .build();
@@ -634,36 +620,6 @@ public class DutchPayService {
         DutchPaySessionDetailResponse response = toDetailResponse(sessionId);
         publishAfterCommit(sessionId, eventType, response);
         return response;
-    }
-
-    private DutchPayParticipantPaymentResultResponse toParticipantPaymentResultResponse(
-            DutchPaySessionEntity session,
-            DutchPaySessionDetailResponse detail,
-            boolean completed) {
-        Long hostAuthPaymentId = completed ? session.getHost_auth_payment_id() : null;
-        String reason = completed ? HOST_AUTH_VOID_REASON_COMPLETED : null;
-
-        return DutchPayParticipantPaymentResultResponse.builder()
-                .session_id(session.getSession_id())
-                .status(session.getStatus().name())
-                .session(detail)
-                .host_auth_payment_id_to_void(hostAuthPaymentId)
-                .host_auth_void_required(hostAuthPaymentId != null)
-                .host_auth_void_idempotency_key(hostAuthPaymentId == null
-                        ? null
-                        : buildHostAuthVoidIdempotencyKey(session.getSession_id(), hostAuthPaymentId, reason))
-                .host_auth_void_reason(reason)
-                .build();
-    }
-
-    private String buildHostAuthVoidIdempotencyKey(Long sessionId, Long hostAuthPaymentId, String reason) {
-        return HOST_AUTH_VOID_IDEMPOTENCY_PREFIX
-                + ":"
-                + sessionId
-                + ":"
-                + hostAuthPaymentId
-                + ":"
-                + reason;
     }
 
     // [be] 영은 260523 1120 | 응답 DTO가 필요 없는 내부 상태 변경에서도 SSE 이벤트를 예약한다
