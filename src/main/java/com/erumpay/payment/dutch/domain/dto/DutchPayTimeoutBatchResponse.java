@@ -48,6 +48,12 @@ public class DutchPayTimeoutBatchResponse {
         /** Core가 void 처리해야 하는 대표자 auth-only payment_id. */
         private Long host_auth_payment_id_to_void;
 
+        /** Core가 void 요청 멱등성 보장에 사용할 수 있는 서버 생성 멱등키. */
+        private String host_auth_void_idempotency_key;
+
+        /** void가 필요한 이유. 예: DUTCH_TIMEOUT. */
+        private String host_auth_void_reason;
+
         /** 참여자 결제 완료분을 제외하고 대표자가 최종 부담해야 하는 금액. */
         private Long host_final_amount;
 

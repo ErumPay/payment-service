@@ -21,6 +21,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayInviteLinkResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayMyPaymentResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantsConfirmRequest;
@@ -73,7 +74,7 @@ public class DutchPayController {
 
     // [be] 영은 260526 1620 | core/PG 결제 완료 이벤트를 받아 더치페이 참여자 결제 상태를 반영하는 내부 API
     @PostMapping("/internal/v1/dutch-pay/sessions/{session_id}/participants/payment-result")
-    public ResponseEntity<DutchPaySessionDetailResponse> applyParticipantPaymentResult(
+    public ResponseEntity<DutchPayParticipantPaymentResultResponse> applyParticipantPaymentResult(
             @PathVariable("session_id") Long session_id,
             @Valid @RequestBody DutchPayParticipantPaymentResultRequest request) {
         log.info("/internal/v1/dutch-pay/sessions/{}/participants/payment-result Controller", session_id);
