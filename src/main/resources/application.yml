@@ -39,12 +39,20 @@ spring:
       port: ${REDIS_PORT:6379}
 
 app:
+  cors:
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:19000,http://localhost:5173,http://localhost:8080}
+    allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,PATCH,DELETE,OPTIONS}
+    allowed-headers: ${CORS_ALLOWED_HEADERS:*}
+    exposed-headers: ${CORS_EXPOSED_HEADERS:}
+    allow-credentials: ${CORS_ALLOW_CREDENTIALS:true}
+    max-age: ${CORS_MAX_AGE:3600}
   kafka:
     topics:
       recommend-command: ${RECOMMEND_COMMAND_TOPIC:recommend.command}
       recommend-event: ${RECOMMEND_EVENT_TOPIC:recommend.event}
   redis:
     channels:
+      core-pay-events: ${CORE_PAY_EVENT_CHANNEL:core-pay:events}
       dutch-pay-session-events: ${DUTCH_PAY_SESSION_EVENT_CHANNEL:dutch-pay:session-events}
       remote-pay-request-events: ${REMOTE_PAY_REQUEST_EVENT_CHANNEL:remote-pay:request-events}
   remote-pay:
@@ -56,6 +64,7 @@ auth:
 
 pg:
   base-url: ${PG_BASE_URL}
+  authorization: ${PG_AUTHORIZATION:Bearer server-test-token}
 
 recommend:
   base-url: ${RECOMMEND_BASE_URL}

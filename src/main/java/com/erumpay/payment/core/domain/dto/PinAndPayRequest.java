@@ -2,6 +2,7 @@ package com.erumpay.payment.core.domain.dto;
 
 import java.util.List;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -19,16 +20,20 @@ import lombok.NoArgsConstructor;
 public class PinAndPayRequest {
     @NotBlank
     @Pattern(regexp = "^\\d{6}$", message = "pin must be 6 digits")
+    @Schema(description = "결제 PIN 6자리", example = "123456")
     private String pin;
 
     @NotNull
+    @Schema(description = "결제 ID", example = "10001")
     private Long paymentId;
 
     @NotNull
     @Positive
+    @Schema(description = "총 결제 금액", example = "15000")
     private Long totalAmount;
 
     @NotEmpty
+    @Schema(description = "카드 분할 결제 목록", example = "[{\"cardId\":1,\"amount\":10000}]")
     private List<CardPortion> cards;
 
     @Getter
@@ -39,10 +44,12 @@ public class PinAndPayRequest {
 
         @NotNull
         @Positive
+        @Schema(description = "카드 ID", example = "1")
         private Long cardId;
 
         @NotNull
         @Positive
+        @Schema(description = "해당 카드 결제 금액", example = "10000")
         private Long amount;
     }
 }
