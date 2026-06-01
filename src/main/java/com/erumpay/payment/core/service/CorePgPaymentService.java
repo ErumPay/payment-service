@@ -1,5 +1,6 @@
 package com.erumpay.payment.core.service;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
@@ -10,6 +11,7 @@ import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
 import com.erumpay.payment.core.domain.dto.CoreSseEventType;
+import com.erumpay.payment.core.domain.dto.PaidCardRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
@@ -40,6 +42,7 @@ public class CorePgPaymentService {
     private final DutchPayService dutchPayService;
     private final CardClient cardClient;
 
+    // [be] 다윤 260601 20:00 | pg 에게 결제 요청 진입점
     public void requestPgPayments(CoreEntity payment, PinAndPayRequest request) {
 
         String savedIdempotencyKey = payment.getIdempotencyKey();
@@ -52,21 +55,24 @@ public class CorePgPaymentService {
 
         // [be] 다윤 260527 단일 카드 결제 요청만 강제
         for (PinAndPayRequest.CardPortion card : request.getCards()) {
-            PgAuthPayResponse pgResponse = requestPgPayment(payment, card, savedIdempotencyKey, useAuthOnly);
-            handlePgResponse(payment, useAuthOnly, pgResponse);
+            CardBillingKeyResponse billingKey = fetchBillingKeyOrThrow(payment, card);
+            PgAuthPayResponse pgResponse = requestPgPayment(payment, card, billingKey, savedIdempotencyKey,
+                    useAuthOnly);
+            handlePgResponse(payment, useAuthOnly, pgResponse, card, billingKey);
         }
     }
 
+    // [be] 다윤 260601 20:00 | pg 에게 AUTH 또는 AUTH-ONLY 요청 분기
     private PgAuthPayResponse requestPgPayment(
             CoreEntity payment,
             PinAndPayRequest.CardPortion card,
+            CardBillingKeyResponse billingKey,
             String savedIdempotencyKey,
             boolean useAuthOnly) {
-        CardBillingKeyResponse billingKey = fetchBillingKeyOrThrow(payment, card);
         PgAuthPayRequest pgAuthRequest = buildPgAuthRequest(payment, card, billingKey);
 
         try {
-            return useAuthOnly
+            PgAuthPayResponse pgResponse = useAuthOnly
                     ? pgClient.pgPaymentAuthOnlyRequest(
                             AUTHORIZATION,
                             savedIdempotencyKey,
@@ -75,6 +81,14 @@ public class CorePgPaymentService {
                             AUTHORIZATION,
                             savedIdempotencyKey,
                             pgAuthRequest);
+            log.info(
+                    "pg payment success. paymentId={}, cardId={}, status={}, pgTxnId={}, txnType={}",
+                    payment.getPaymentId(),
+                    card.getCardId(),
+                    pgResponse == null ? null : pgResponse.getStatus(),
+                    pgResponse == null ? null : pgResponse.getPgTxnId(),
+                    pgResponse == null ? null : pgResponse.getTxnType());
+            return pgResponse;
         } catch (FeignException e) {
             log.error("pg feign error. status={}, body={}", e.status(), e.contentUTF8());
             notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, null);
@@ -85,6 +99,7 @@ public class CorePgPaymentService {
         }
     }
 
+    // [be] 다윤 260601 20:00 | pg request dto
     private PgAuthPayRequest buildPgAuthRequest(
             CoreEntity payment,
             PinAndPayRequest.CardPortion card,
@@ -98,7 +113,13 @@ public class CorePgPaymentService {
                 .build();
     }
 
-    private void handlePgResponse(CoreEntity payment, boolean useAuthOnly, PgAuthPayResponse pgResponse) {
+    // [be] 다윤 260601 20:00 | pg 응답 분기 처리 후 SSE push
+    private void handlePgResponse(
+            CoreEntity payment,
+            boolean useAuthOnly,
+            PgAuthPayResponse pgResponse,
+            PinAndPayRequest.CardPortion card,
+            CardBillingKeyResponse billingKey) {
         log.info("pgClientResponse : {}", pgResponse);
 
         if (pgResponse == null || pgResponse.getStatus() == null) {
@@ -109,8 +130,9 @@ public class CorePgPaymentService {
 
         String pgStatus = pgResponse.getStatus();
         if (PG_STATUS_APPROVED.equalsIgnoreCase(pgStatus)) {
-            markPaymentSucceeded(payment, useAuthOnly, pgResponse);
+            markPaymentSucceeded(payment, useAuthOnly, pgResponse, card, billingKey);
             publishPaidEvent(payment.getPaymentId());
+
             return;
         }
 
@@ -121,7 +143,13 @@ public class CorePgPaymentService {
         throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
     }
 
-    private void markPaymentSucceeded(CoreEntity payment, boolean useAuthOnly, PgAuthPayResponse pgResponse) {
+    // [be] 다윤 260601 20:00 | 결제 성공 시 원장기록, 가승인의 경우 더치에게 가승인 성공 전달, 결제카드 기록
+    private void markPaymentSucceeded(
+            CoreEntity payment,
+            boolean useAuthOnly,
+            PgAuthPayResponse pgResponse,
+            PinAndPayRequest.CardPortion card,
+            CardBillingKeyResponse billingKey) {
         if (useAuthOnly) {
             corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
             notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
@@ -129,14 +157,27 @@ public class CorePgPaymentService {
         }
 
         corePgPaymentPersistenceService.markPaidAndSaveEvent(payment.getPaymentId(), pgResponse);
+        try {
+            PaidCardRequest paidCard = buildPaidCardRequest(payment, pgResponse, card, billingKey);
+            corePgPaymentPersistenceService.savePaidCardDetail(paidCard);
+        } catch (RuntimeException e) {
+            log.error(
+                    "paid card detail save failed, but payment is already marked PAID. paymentId={}, pgTxnId={}, cardId={}",
+                    payment.getPaymentId(),
+                    pgResponse == null ? null : pgResponse.getPgTxnId(),
+                    card == null ? null : card.getCardId(),
+                    e);
+        }
         notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
     }
 
+    // [be] 다윤 260601 20:00 | 결제 실패 시 원장기록, 가승인의 경우 더치에게 가승인 실패 전달
     private void markPaymentFailed(CoreEntity payment, PgAuthPayResponse pgResponse) {
         corePgPaymentPersistenceService.markFailedAndSaveEvent(payment.getPaymentId(), pgResponse);
         notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, pgResponse);
     }
 
+    // [be] 다윤 260601 20:00 | SSE PG_PENDING push
     private void publishPendingEvent(Long paymentId) {
         coreSseService.publishPaymentUpdated(
                 paymentId,
@@ -144,6 +185,7 @@ public class CorePgPaymentService {
                 Map.of("status", "PG_PENDING"));
     }
 
+    // [be] 다윤 260601 20:00 | SSE PAID push
     private void publishPaidEvent(Long paymentId) {
         coreSseService.publishPaymentUpdated(
                 paymentId,
@@ -151,6 +193,7 @@ public class CorePgPaymentService {
                 Map.of("status", "PAID"));
     }
 
+    // [be] 다윤 260601 20:00 | SSE FAILED push
     private void publishFailedEvent(Long paymentId) {
         coreSseService.publishPaymentUpdated(
                 paymentId,
@@ -158,11 +201,19 @@ public class CorePgPaymentService {
                 Map.of("status", "FAILED"));
     }
 
+    // [be] 다윤 260601 20:00 | 결제할 카드의 빌링키 조회 요청 - card service feign 통신
     private CardBillingKeyResponse fetchBillingKeyOrThrow(
             CoreEntity payment,
             PinAndPayRequest.CardPortion card) {
         try {
             CardBillingKeyResponse billingKey = cardClient.billingKeyLookUp(card.getCardId(), payment.getUserId());
+            log.info(
+                    "card billing-key lookup success. paymentId={}, cardId={}, userId={}, maskedNumber={}, cardName={}",
+                    payment.getPaymentId(),
+                    card.getCardId(),
+                    payment.getUserId(),
+                    billingKey == null ? null : billingKey.getMaskedNumber(),
+                    billingKey == null ? "null" : billingKey.getCardName());
 
             if (billingKey == null || billingKey.getBillingKey() == null || billingKey.getBillingKey().isBlank()) {
                 log.error("card billing-key is empty. paymentId={}, cardId={}, userId={}",
@@ -211,6 +262,60 @@ public class CorePgPaymentService {
         return body.length() <= maxLen ? body : body.substring(0, maxLen) + "...";
     }
 
+    private PaidCardRequest buildPaidCardRequest(
+            CoreEntity payment,
+            PgAuthPayResponse pgResponse,
+            PinAndPayRequest.CardPortion card,
+            CardBillingKeyResponse billingKey) {
+        if (payment == null
+                || payment.getPaymentId() == null
+                || pgResponse == null
+                || pgResponse.getPgTxnId() == null
+                || card == null
+                || card.getCardId() == null) {
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+
+        String approvalNumber = pgResponse.getPgApprovalNumber();
+        if (approvalNumber == null || approvalNumber.isBlank()) {
+            approvalNumber = "UNKNOWN_APPROVAL";
+        }
+
+        Long paidAmount = pgResponse.getAmount();
+        if (paidAmount == null) {
+            paidAmount = card.getAmount();
+        }
+        if (paidAmount == null) {
+            log.warn("paid amount is missing. fallback to 0. paymentId={}, pgTxnId={}, cardId={}",
+                    payment.getPaymentId(),
+                    pgResponse.getPgTxnId(),
+                    card.getCardId());
+            paidAmount = 0L;
+        }
+
+        LocalDateTime paidAt = pgResponse.getApprovedAt() == null ? LocalDateTime.now() : pgResponse.getApprovedAt();
+        String maskedNumber = (billingKey == null || billingKey.getMaskedNumber() == null
+                || billingKey.getMaskedNumber().isBlank())
+                        ? "UNKNOWN_MASKED"
+                        : billingKey.getMaskedNumber();
+        String cardName = (billingKey == null || billingKey.getCardName() == null || billingKey.getCardName().isBlank())
+                ? "UNKNOWN_CARD"
+                : billingKey.getCardName();
+
+        return PaidCardRequest.builder()
+                .paymentId(payment.getPaymentId())
+                .pgTxnId(pgResponse.getPgTxnId())
+                .pgApprovalNum(approvalNumber)
+                .cardId(card.getCardId())
+                .maskedNumber(maskedNumber)
+                .cardName(cardName)
+                .paidAmount(paidAmount)
+                .discountAmount(0L)
+                .benefitDesc(null)
+                .paidAt(paidAt)
+                .build();
+    }
+
     private boolean shouldUseAuthOnly(CoreEntity payment) {
         if (payment.getPayment_type() != CoreEntity.PaymentType.DUTCH) {
             return false;
@@ -224,6 +329,7 @@ public class CorePgPaymentService {
         return paymentIntent == CoreEntity.PaymentIntent.DUTCH_HOST_AUTH_ONLY_PAY;
     }
 
+    // [be] 다윤 260601 20:00 | 더치에게 가승인 여부를 전달
     private void notifyHostAuthorizationResultIfNeeded(
             CoreEntity payment,
             String status,
@@ -244,6 +350,7 @@ public class CorePgPaymentService {
                         .build());
     }
 
+    // [be] 다윤 260601 20:00 | 참여자 결제 완료 여부를 더치에게 전달
     private void notifyParticipantPaymentResultIfNeeded(
             CoreEntity payment,
             String status,
@@ -282,6 +389,7 @@ public class CorePgPaymentService {
         }
     }
 
+    // [be] 다윤 260601 20:00 | 더치페이 여부 판단
     private boolean shouldNotifyParticipantPaymentResult(CoreEntity payment) {
         if (payment.getPayment_type() != CoreEntity.PaymentType.DUTCH) {
             return false;

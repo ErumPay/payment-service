@@ -15,6 +15,7 @@ public class CardBillingKeyResponse {
     private Long cardId;
     private Long userId;
     private Long cardProductId;
+    private String cardName;
     private String billingKey;
     private String maskedNumber;
 
