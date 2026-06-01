@@ -21,20 +21,18 @@ public class CorePayRedisConfig {
 
     private final CoreSseTopicProperties coreSseTopicProperties;
 
-    // [be] codex 260601 | 코어 결제 SSE 상태 변경 이벤트를 수신할 Redis Pub/Sub 채널
+    // [be] 다윤 260601 | 코어 결제 SSE 상태 변경 이벤트를 수신할 Redis Pub/Sub 채널
     @Bean
     public ChannelTopic corePayEventTopic() {
         return new ChannelTopic(coreSseTopicProperties.getPaymentEvents());
     }
 
-    // [be] codex 260601 | Redis 채널 메시지를 구독해 현재 인스턴스의 코어 SSE 연결로 전달한다.
+    // [be] 다윤 260601 | Redis 채널 메시지를 구독해 현재 인스턴스의 코어 SSE 연결로 전달한다.
     @Bean
     public RedisMessageListenerContainer corePayRedisMessageListenerContainer(
             RedisConnectionFactory redisConnectionFactory,
-            @Qualifier("corePayEventTopic")
-            ChannelTopic corePayEventTopic,
-            @Qualifier("redisListenerTaskExecutor")
-            ThreadPoolTaskExecutor redisListenerTaskExecutor,
+            @Qualifier("corePayEventTopic") ChannelTopic corePayEventTopic,
+            @Qualifier("redisListenerTaskExecutor") ThreadPoolTaskExecutor redisListenerTaskExecutor,
             CoreSseRedisSubscriber coreSseRedisSubscriber) {
 
         log.info("RedisMessageListenerContainer corePayRedisMessageListenerContainer called.");
