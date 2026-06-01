@@ -48,88 +48,114 @@ public class CorePgPaymentService {
         }
 
         boolean useAuthOnly = shouldUseAuthOnly(payment);
-        coreSseService.publishPaymentUpdated(
-                payment.getPaymentId(),
-                CoreSseEventType.PAYMENT_PENDING,
-                Map.of("status", "PENDING"));
+        publishPendingEvent(payment.getPaymentId());
 
         // [be] 다윤 260527 단일 카드 결제 요청만 강제
         for (PinAndPayRequest.CardPortion card : request.getCards()) {
+            PgAuthPayResponse pgResponse = requestPgPayment(payment, card, savedIdempotencyKey, useAuthOnly);
+            handlePgResponse(payment, useAuthOnly, pgResponse);
+        }
+    }
 
-            // [be] 다윤 260529 billing-key 조회
-            CardBillingKeyResponse billingKey = fetchBillingKeyOrThrow(payment, card);
+    private PgAuthPayResponse requestPgPayment(
+            CoreEntity payment,
+            PinAndPayRequest.CardPortion card,
+            String savedIdempotencyKey,
+            boolean useAuthOnly) {
+        CardBillingKeyResponse billingKey = fetchBillingKeyOrThrow(payment, card);
+        PgAuthPayRequest pgAuthRequest = buildPgAuthRequest(payment, card, billingKey);
 
-            PgAuthPayRequest pgAuthRequest = PgAuthPayRequest.builder()
-                    .payPaymentId(payment.getPaymentId())
-                    .merchantId(payment.getMerchant_id())
-                    .billingKey(billingKey.getBillingKey())
-                    .originalAmount(payment.getAmount())
-                    .approvedAmount(card.getAmount())
-                    .build();
-
-            final PgAuthPayResponse pgResponse;
-            try {
-                pgResponse = useAuthOnly
-                        ? pgClient.pgPaymentAuthOnlyRequest(
-                                AUTHORIZATION,
-                                savedIdempotencyKey,
-                                pgAuthRequest)
-                        : pgClient.pgPaymentRequest(
-                                AUTHORIZATION,
-                                savedIdempotencyKey,
-                                pgAuthRequest);
-            } catch (FeignException e) {
-                log.error("pg feign error. status={}, body={}", e.status(), e.contentUTF8());
-                notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, null);
-                if (e.status() >= 400 && e.status() < 500) {
-                    throw new CustomException(ErrorCode.BAD_REQUEST);
-                }
-                throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
-            }
-
-            log.info("pgClientResponse : {}", pgResponse);
-
-            // [be] 다윤 260528 00:00 | pg 응답 분기
-            if (pgResponse == null || pgResponse.getStatus() == null) {
-                corePgPaymentPersistenceService.markFailedAndSaveEvent(payment.getPaymentId(), pgResponse);
-                notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, pgResponse);
-                coreSseService.publishPaymentUpdated(
-                        payment.getPaymentId(),
-                        CoreSseEventType.PAYMENT_FAILED,
-                        Map.of("status", "FAILED"));
-                throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
-            }
-            String pgStatus = pgResponse.getStatus();
-
-            if (PG_STATUS_APPROVED.equalsIgnoreCase(pgStatus)) {
-                if (useAuthOnly) {
-                    corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
-                    notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
-                    coreSseService.publishPaymentUpdated(
-                            payment.getPaymentId(),
-                            CoreSseEventType.PAYMENT_PAID,
-                            Map.of("status", "PAID"));
-                } else {
-                    corePgPaymentPersistenceService.markPaidAndSaveEvent(payment.getPaymentId(), pgResponse);
-                    notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
-                    coreSseService.publishPaymentUpdated(
-                            payment.getPaymentId(),
-                            CoreSseEventType.PAYMENT_PAID,
-                            Map.of("status", "PAID"));
-                }
-                // [be] 다윤 260528 00:00 | cardDetails 추가 예정
-                continue;
-            }
-
-            corePgPaymentPersistenceService.markFailedAndSaveEvent(payment.getPaymentId(), pgResponse);
-            notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, pgResponse);
-
-            if (PG_STATUS_REJECTED.equalsIgnoreCase(pgStatus)) {
+        try {
+            return useAuthOnly
+                    ? pgClient.pgPaymentAuthOnlyRequest(
+                            AUTHORIZATION,
+                            savedIdempotencyKey,
+                            pgAuthRequest)
+                    : pgClient.pgPaymentRequest(
+                            AUTHORIZATION,
+                            savedIdempotencyKey,
+                            pgAuthRequest);
+        } catch (FeignException e) {
+            log.error("pg feign error. status={}, body={}", e.status(), e.contentUTF8());
+            notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, null);
+            if (e.status() >= 400 && e.status() < 500) {
                 throw new CustomException(ErrorCode.BAD_REQUEST);
             }
-
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
+    }
+
+    private PgAuthPayRequest buildPgAuthRequest(
+            CoreEntity payment,
+            PinAndPayRequest.CardPortion card,
+            CardBillingKeyResponse billingKey) {
+        return PgAuthPayRequest.builder()
+                .payPaymentId(payment.getPaymentId())
+                .merchantId(payment.getMerchant_id())
+                .billingKey(billingKey.getBillingKey())
+                .originalAmount(payment.getAmount())
+                .approvedAmount(card.getAmount())
+                .build();
+    }
+
+    private void handlePgResponse(CoreEntity payment, boolean useAuthOnly, PgAuthPayResponse pgResponse) {
+        log.info("pgClientResponse : {}", pgResponse);
+
+        if (pgResponse == null || pgResponse.getStatus() == null) {
+            markPaymentFailed(payment, pgResponse);
+            publishFailedEvent(payment.getPaymentId());
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+        }
+
+        String pgStatus = pgResponse.getStatus();
+        if (PG_STATUS_APPROVED.equalsIgnoreCase(pgStatus)) {
+            markPaymentSucceeded(payment, useAuthOnly, pgResponse);
+            publishPaidEvent(payment.getPaymentId());
+            return;
+        }
+
+        markPaymentFailed(payment, pgResponse);
+        if (PG_STATUS_REJECTED.equalsIgnoreCase(pgStatus)) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+        throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+    }
+
+    private void markPaymentSucceeded(CoreEntity payment, boolean useAuthOnly, PgAuthPayResponse pgResponse) {
+        if (useAuthOnly) {
+            corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
+            notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
+            return;
+        }
+
+        corePgPaymentPersistenceService.markPaidAndSaveEvent(payment.getPaymentId(), pgResponse);
+        notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
+    }
+
+    private void markPaymentFailed(CoreEntity payment, PgAuthPayResponse pgResponse) {
+        corePgPaymentPersistenceService.markFailedAndSaveEvent(payment.getPaymentId(), pgResponse);
+        notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, pgResponse);
+    }
+
+    private void publishPendingEvent(Long paymentId) {
+        coreSseService.publishPaymentUpdated(
+                paymentId,
+                CoreSseEventType.PG_PENDING,
+                Map.of("status", "PG_PENDING"));
+    }
+
+    private void publishPaidEvent(Long paymentId) {
+        coreSseService.publishPaymentUpdated(
+                paymentId,
+                CoreSseEventType.PAYMENT_PAID,
+                Map.of("status", "PAID"));
+    }
+
+    private void publishFailedEvent(Long paymentId) {
+        coreSseService.publishPaymentUpdated(
+                paymentId,
+                CoreSseEventType.PAYMENT_FAILED,
+                Map.of("status", "FAILED"));
     }
 
     private CardBillingKeyResponse fetchBillingKeyOrThrow(
