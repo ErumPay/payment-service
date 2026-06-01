@@ -107,6 +107,11 @@ public class DutchPaySessionDetailResponse {
                         && participant.getPayment() == null)) {
             return ProgressStep.PAYMENT_REQUEST.name();
         }
+        if (allPayableMembersPaid(session, participants)
+                && hostAmount(session, participants) > 0
+                && hostStatus(session, participants) != ParticipantStatus.HOST_PAID) {
+            return ProgressStep.FINAL_PAYMENT_REQUIRED.name();
+        }
         if (participants.stream().anyMatch(participant ->
                 !isHost(session, participant)
                         && (participant.getStatus() == ParticipantStatus.PAID || participant.getPayment() != null))) {
@@ -133,6 +138,34 @@ public class DutchPaySessionDetailResponse {
                 .filter(amount -> amount != null)
                 .findFirst()
                 .orElse(0L);
+    }
+
+    private static ParticipantStatus hostStatus(
+            DutchPaySessionEntity session,
+            List<DutchPayParticipantEntity> participants) {
+        if (participants == null) {
+            return null;
+        }
+
+        return participants.stream()
+                .filter(participant -> isHost(session, participant))
+                .map(DutchPayParticipantEntity::getStatus)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static boolean allPayableMembersPaid(
+            DutchPaySessionEntity session,
+            List<DutchPayParticipantEntity> participants) {
+        if (participants == null) {
+            return false;
+        }
+
+        return participants.stream()
+                .filter(participant -> !isHost(session, participant))
+                .filter(participant -> participant.getStatus() != ParticipantStatus.REJECTED)
+                .filter(participant -> participant.getStatus() != ParticipantStatus.TIMEOUT)
+                .allMatch(participant -> participant.getStatus() == ParticipantStatus.PAID);
     }
 
     private enum ProgressStep {

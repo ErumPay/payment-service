@@ -202,6 +202,32 @@ public class DutchPayParticipantEntity {
         this.updated_at = now;
     }
 
+    // [be] 영은 260601 | 대표자 최종 부담금 결제가 완료되면 대표자 참여자 row를 HOST_PAID로 전환한다.
+    public void completeHostFinalPayment(CoreEntity payment, LocalDateTime now) {
+        validateNow(now);
+
+        if (payment == null || payment.getPaymentId() == null) {
+            throw new IllegalArgumentException("payment must not be null");
+        }
+        if (this.status == ParticipantStatus.HOST_PAID) {
+            return;
+        }
+        if (this.status != ParticipantStatus.PENDING) {
+            throw new IllegalStateException("Only pending host participant can complete final payment");
+        }
+        if (this.amount == null || !this.amount.equals(payment.getAmount())) {
+            throw new IllegalArgumentException(ERROR_AMOUNT_MISMATCH);
+        }
+        if (this.payment != null && !this.payment.getPaymentId().equals(payment.getPaymentId())) {
+            throw new IllegalStateException(ERROR_PAYMENT_ALREADY_ASSIGNED);
+        }
+
+        this.payment = payment;
+        this.status = ParticipantStatus.HOST_PAID;
+        this.paid_at = now;
+        this.updated_at = now;
+    }
+
     public void timeout(LocalDateTime now) {
         validateNow(now);
 

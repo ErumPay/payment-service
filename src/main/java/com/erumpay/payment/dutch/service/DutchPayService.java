@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -33,6 +34,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayAmountRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayHostFinalPaymentResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteLinkResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayMyPaymentResponse;
@@ -68,6 +70,7 @@ public class DutchPayService {
 
     private final DutchPaySessionRepository dutchPaySessionRepository;
     private final DutchPayParticipantRepository dutchPayParticipantRepository;
+    private final CoreRepository coreRepository;
     private final DutchPaySseService dutchPaySseService;
 
     // [be] 영은 260523 1120 | core에서 생성한 대표자 payment_id를 받아 더치페이 세션과 대표자 참여자 row를 만든다
@@ -179,7 +182,7 @@ public class DutchPayService {
         publishSessionUpdated(sessionId, "PARTICIPANT_PAYMENT_CREATED");
     }
 
-    // [be] 영은 260526 1620 | 참여자 결제 완료 이벤트를 반영하고 모든 참여자가 결제하면 세션을 완료 처리한다
+    // [be] 영은 260601 | 참여자 결제 완료를 반영하고, 전원 결제 시 대표자 최종 결제 대기 상태를 알린다.
     @Transactional
     public DutchPaySessionDetailResponse applyParticipantPaymentResult(
             Long sessionId,
@@ -206,15 +209,51 @@ public class DutchPayService {
         }
 
         List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
-        if (allPayableMembersPaid(session, participants)) {
-            session.complete(LocalDateTime.now());
-        }
+        boolean allMembersPaid = allPayableMembersPaid(session, participants);
 
         return publishAndReturn(
                 sessionId,
-                session.getStatus() == DutchPayStatus.COMPLETED
-                        ? "SESSION_COMPLETED"
+                allMembersPaid
+                        ? "HOST_FINAL_PAYMENT_REQUIRED"
                         : "PARTICIPANT_PAYMENT_PAID");
+    }
+
+    // [be] 영은 260601 | Core가 대표자 최종 결제 완료를 알려주면 대표자 결제 상태와 세션 완료를 확정한다.
+    @Transactional
+    public DutchPaySessionDetailResponse applyHostFinalPaymentResult(
+            Long sessionId,
+            DutchPayHostFinalPaymentResultRequest request) {
+        validateHostFinalPaymentResultRequest(sessionId, request);
+
+        DutchPaySessionEntity session = getSessionForPaymentResultUpdate(sessionId);
+        if (!request.getUser_id().equals(session.getHost_user_id())) {
+            throw new CustomException(ErrorCode.DUTCH_HOST_ONLY_ACTION);
+        }
+        if (session.getStatus() != DutchPayStatus.IN_PROGRESS
+                && session.getStatus() != DutchPayStatus.TIMEOUT_HANDLED) {
+            throw sessionStateException(session);
+        }
+
+        CoreEntity payment = coreRepository.findById(request.getPayment_id())
+                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+        if (!request.getUser_id().equals(payment.getUserId())) {
+            throw new CustomException(ErrorCode.DUTCH_ACCESS_DENIED);
+        }
+
+        DutchPayParticipantEntity host = getParticipants(sessionId).stream()
+                .filter(participant -> participant.getUser_id().equals(session.getHost_user_id()))
+                .findFirst()
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
+
+        try {
+            LocalDateTime now = LocalDateTime.now();
+            host.completeHostFinalPayment(payment, now);
+            session.complete(now);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw toParticipantPaymentException(e);
+        }
+
+        return publishAndReturn(sessionId, "SESSION_COMPLETED");
     }
 
     @Transactional
@@ -309,7 +348,7 @@ public class DutchPayService {
 
         return dutchPaySessionRepository.findActiveSessionsByUserId(
                 userId,
-                List.of(DutchPayStatus.CREATED, DutchPayStatus.IN_PROGRESS)).stream()
+                List.of(DutchPayStatus.CREATED, DutchPayStatus.IN_PROGRESS, DutchPayStatus.TIMEOUT_HANDLED)).stream()
                 .map(session -> DutchPaySessionDetailResponse.fromEntity(
                         session,
                         getParticipants(session.getSession_id())))
@@ -574,6 +613,22 @@ public class DutchPayService {
     }
 
     // [be] 영은 260523 1120 | 앱 친구 초대 요청의 대표자/세션/초대 대상 목록을 검증한다
+    // [be] 영은 260601 | 대표자 최종 결제 완료 콜백의 세션/대표자/결제 식별자와 성공 상태를 검증한다.
+    private void validateHostFinalPaymentResultRequest(
+            Long sessionId,
+            DutchPayHostFinalPaymentResultRequest request) {
+        if (sessionId == null
+                || request == null
+                || request.getUser_id() == null
+                || request.getPayment_id() == null
+                || request.getStatus() == null
+                || request.getStatus().isBlank()
+                || (!"PAID".equalsIgnoreCase(request.getStatus())
+                && !"APPROVED".equalsIgnoreCase(request.getStatus()))) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
+        }
+    }
+
     private void validateInviteRequest(
             Long hostUserId,
             Long sessionId,

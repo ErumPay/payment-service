@@ -17,6 +17,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayAmountRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayHostFinalPaymentResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteLinkResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayMyPaymentResponse;
@@ -79,6 +80,16 @@ public class DutchPayController {
         log.info("/internal/v1/dutch-pay/sessions/{}/participants/payment-result Controller", session_id);
 
         return ResponseEntity.ok(dutchPayService.applyParticipantPaymentResult(session_id, request));
+    }
+
+    // [be] 영은 260601 | Core가 대표자 최종 결제 완료를 전달하면 Dutch 세션을 COMPLETED로 전환하는 내부 API
+    @PostMapping("/internal/v1/dutch-pay/sessions/{session_id}/host-final-payment-result")
+    public ResponseEntity<DutchPaySessionDetailResponse> applyHostFinalPaymentResult(
+            @PathVariable("session_id") Long session_id,
+            @Valid @RequestBody DutchPayHostFinalPaymentResultRequest request) {
+        log.info("/internal/v1/dutch-pay/sessions/{}/host-final-payment-result Controller", session_id);
+
+        return ResponseEntity.ok(dutchPayService.applyHostFinalPaymentResult(session_id, request));
     }
 
     @PostMapping("/internal/v1/dutch-pay/timeout-batch")
