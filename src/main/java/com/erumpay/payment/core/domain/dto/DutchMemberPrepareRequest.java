@@ -24,10 +24,6 @@ public class DutchMemberPrepareRequest {
     @Positive
     private Long sessionId;
 
-    @NotNull
-    @Positive
-    private Long participantId;
-
     @NotBlank
     private String orderName;
 

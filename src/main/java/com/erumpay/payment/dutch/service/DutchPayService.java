@@ -132,7 +132,6 @@ public class DutchPayService {
         DutchPayParticipantEntity participant = dutchPayParticipantRepository
                 .findParticipantForPaymentValidation(
                         sessionId,
-                        request.getParticipant_id(),
                         request.getUser_id())
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
         if (participant.getStatus() != ParticipantStatus.PENDING
@@ -144,7 +143,6 @@ public class DutchPayService {
 
         return DutchPayParticipantPaymentValidateResponse.valid(
                 sessionId,
-                participant.getParticipant_id(),
                 participant.getUser_id(),
                 participant.getAmount(),
                 participant.getStatus().name());
@@ -154,11 +152,9 @@ public class DutchPayService {
     @Transactional
     public void registerParticipantPayment(
             Long sessionId,
-            Long participantId,
             Long userId,
             CoreEntity payment) {
         if (sessionId == null
-                || participantId == null
                 || userId == null
                 || payment == null
                 || payment.getPaymentId() == null) {
@@ -169,7 +165,7 @@ public class DutchPayService {
         ensureInProgress(session);
 
         DutchPayParticipantEntity participant = dutchPayParticipantRepository
-                .findParticipantForPaymentUpdate(sessionId, participantId, userId)
+                .findParticipantForPaymentUpdate(sessionId, userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
         if (userId.equals(session.getHost_user_id())) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
@@ -559,13 +555,12 @@ public class DutchPayService {
         }
     }
 
-    // [be] 영은 260523 1120 | 참여자 결제 검증 요청의 참여자/회원/금액 식별자를 검증한다
+    // [be] 영은 260601 | Core가 전달한 세션/회원/금액으로 참여자 결제 가능 여부를 검증한다.
     private void validateParticipantPaymentRequest(
             Long sessionId,
             DutchPayParticipantPaymentValidateRequest request) {
         if (sessionId == null
                 || request == null
-                || request.getParticipant_id() == null
                 || request.getUser_id() == null
                 || request.getAmount() == null
                 || request.getAmount() <= 0) {
