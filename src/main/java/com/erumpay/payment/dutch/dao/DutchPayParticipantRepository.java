@@ -82,6 +82,7 @@ public interface DutchPayParticipantRepository extends JpaRepository<DutchPayPar
     @Query("""
             select p
             from DutchPayParticipantEntity p
+            left join fetch p.payment
             where p.session.session_id = :sessionId
             order by p.participant_id
             """)
