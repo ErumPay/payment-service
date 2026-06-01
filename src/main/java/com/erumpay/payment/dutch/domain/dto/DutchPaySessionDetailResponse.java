@@ -1,24 +1,14 @@
 package com.erumpay.payment.dutch.domain.dto;
 
-import java.util.List;
 import java.util.Objects;
 
-import com.erumpay.payment.dutch.domain.entity.DutchPayParticipantEntity;
 import com.erumpay.payment.dutch.domain.entity.DutchPayParticipantEntity.ParticipantStatus;
-import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity.DutchPayStatus;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity.SplitMethod;
 
 import lombok.Builder;
 import lombok.Getter;
 
-/**
- * 더치페이 세션 상세 응답 DTO.
- *
- * <p>세션 상세 조회, 진행 중 세션 재진입, SSE 갱신 payload에서 공통으로 사용한다.
- * DB Entity를 그대로 노출하지 않고 프론트가 화면을 복원하는 데 필요한 세션 상태,
- * 참여자 상태, 금액, 진행 단계를 조립해서 내려준다.</p>
- */
 @Builder
 @Getter
 public class DutchPaySessionDetailResponse {
@@ -33,14 +23,6 @@ public class DutchPaySessionDetailResponse {
     private Long remaining_amount;
     private String split_method;
     private String status;
-
-    /**
-     * 프론트 프로그레스바 복원용 세션 전체 진행 단계.
-     *
-     * <p>DB에 저장되는 값이 아니라 {@code session.status}, {@code split_method},
-     * {@code participants.status}, {@code participants.amount}, {@code participants.payment_id}
-     * 기준으로 응답 시점에 계산하는 파생 필드다.</p>
-     */
     private String session_progress_step;
     private List<DutchPayParticipantResponse> participants;
 
@@ -63,10 +45,10 @@ public class DutchPaySessionDetailResponse {
                 .remaining_amount(session.getTotal_amount() - assignedAmount)
                 .split_method(session.getSplit_method().name())
                 .status(session.getStatus().name())
-                .session_progress_step(resolveSessionProgressStep(session, participants))
                 .participants(participants.stream()
                         .map(participant -> DutchPayParticipantResponse.fromEntity(participant, session.getHost_user_id()))
                         .toList())
+                .session_progress_step(resolveSessionProgressStep(session, participants))
                 .build();
     }
 
