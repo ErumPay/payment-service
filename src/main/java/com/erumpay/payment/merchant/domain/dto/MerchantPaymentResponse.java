@@ -33,7 +33,7 @@ public class MerchantPaymentResponse {
                 .status(payment.getPayment_status() == null ? null : payment.getPayment_status().name())
                 .redirectUrl(redirectUrl)
                 .qrToken(qrToken)
-                .paidAt(payment.getPaid_at())
+                .paidAt(payment.getPaidAt())
                 .build();
     }
 }

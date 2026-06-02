@@ -73,9 +73,14 @@ public class CoreEntity {
     // 결제 정보
     @Enumerated(EnumType.STRING)
     private FailCode fail_code;
-    private LocalDateTime updated_at;
-    private LocalDateTime paid_at;
-    private LocalDateTime canceled_at;
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+
+    @Column(name = "paid_at")
+    private LocalDateTime paidAt;
+
+    @Column(name = "canceled_at")
+    private LocalDateTime canceledAt;
 
     // [be] 다윤 260526 결제 요청 status 업데이트
     public void preparePayment(
@@ -87,7 +92,7 @@ public class CoreEntity {
         this.userId = userId;
         this.payment_type = paymentType;
         this.payment_status = PaymentStatus.PAY_PENDING;
-        this.updated_at = updatedAt;
+        this.updatedAt = updatedAt;
     }
 
     // [be] 다윤 260526 대표자 세션아이디 업데이트
@@ -95,7 +100,7 @@ public class CoreEntity {
             Long dutch_session_id, DutchRole dutch_role) {
         this.dutch_session_id = dutch_session_id;
         this.dutch_role = dutch_role;
-        this.updated_at = LocalDateTime.now();
+        this.updatedAt = LocalDateTime.now();
     }
 
     // [be] 다윤 260526 실결제 status 업데이트
@@ -104,7 +109,7 @@ public class CoreEntity {
             throw new IllegalArgumentException("updatedAt must not be null");
         }
         this.payment_status = PaymentStatus.PG_PENDING;
-        this.updated_at = updatedAt;
+        this.updatedAt = updatedAt;
     }
 
     public void payPendingStatusUpdatePayment(LocalDateTime updatedAt) {
@@ -112,7 +117,7 @@ public class CoreEntity {
             throw new IllegalArgumentException("updatedAt must not be null");
         }
         this.payment_status = PaymentStatus.PAY_PENDING;
-        this.updated_at = updatedAt;
+        this.updatedAt = updatedAt;
     }
 
     public void updatePaymentIntent(PaymentIntent paymentIntent, LocalDateTime updatedAt) {
@@ -120,7 +125,7 @@ public class CoreEntity {
             throw new IllegalArgumentException("paymentIntent and updatedAt must not be null");
         }
         this.payment_intent = paymentIntent;
-        this.updated_at = updatedAt;
+        this.updatedAt = updatedAt;
     }
 
     // [be] 다윤 260526 실결제 성공 status 업데이트
@@ -129,8 +134,8 @@ public class CoreEntity {
             throw new IllegalArgumentException("paidAt must not be null");
         }
         this.payment_status = PaymentStatus.PAID;
-        this.paid_at = paidAt;
-        this.updated_at = paidAt;
+        this.paidAt = paidAt;
+        this.updatedAt = paidAt;
     }
 
     // [be] 다윤 260528 가승인 성공 status 업데이트
@@ -139,7 +144,7 @@ public class CoreEntity {
             throw new IllegalArgumentException("authorizedAt must not be null");
         }
         this.payment_status = PaymentStatus.AUTHORIZED;
-        this.updated_at = authorizedAt;
+        this.updatedAt = authorizedAt;
     }
 
     // [be] 다윤 260527 실결제 실패 status 업데이트
@@ -148,7 +153,7 @@ public class CoreEntity {
             throw new IllegalArgumentException("failedAt must not be null");
         }
         this.payment_status = PaymentStatus.FAILED;
-        this.updated_at = failedAt;
+        this.updatedAt = failedAt;
     }
 
     // [be] 다윤 260527 취소 성공 status 업데이트
@@ -157,8 +162,8 @@ public class CoreEntity {
             throw new IllegalArgumentException("canceledAt must not be null");
         }
         this.payment_status = PaymentStatus.CANCELED;
-        this.canceled_at = canceledAt;
-        this.updated_at = canceledAt;
+        this.canceledAt = canceledAt;
+        this.updatedAt = canceledAt;
     }
 
     // [be] 다윤 260526 QR 생성시 new entity 생성
@@ -177,7 +182,7 @@ public class CoreEntity {
                 .channel_type(ChannelType.valueOf(channelType.trim().toUpperCase(Locale.ROOT)))
                 .payment_status(PaymentStatus.CREATED)
                 .created_at(createdAt)
-                .updated_at(createdAt)
+                .updatedAt(createdAt)
                 .build();
     }
 
@@ -202,7 +207,7 @@ public class CoreEntity {
                 .dutch_role(DutchRole.HOST)
                 .payment_status(PaymentStatus.AUTHORIZED)
                 .created_at(createdAt)
-                .updated_at(createdAt)
+                .updatedAt(createdAt)
                 .build();
     }
 
@@ -225,7 +230,7 @@ public class CoreEntity {
                 .remote_request_id(remoteRequestId)
                 .payment_status(PaymentStatus.PAY_PENDING)
                 .created_at(createdAt)
-                .updated_at(createdAt)
+                .updatedAt(createdAt)
                 .build();
     }
 
@@ -238,13 +243,14 @@ public class CoreEntity {
         }
 
         this.dutch_session_id = dutchSessionId;
-        this.updated_at = LocalDateTime.now();
+        this.updatedAt = LocalDateTime.now();
     }
 
     public enum PaymentStatus {
         CREATED,
         PAY_PENDING,
         PG_PENDING,
+        CANCEL_REQUESTED,
         PAID,
         FAILED,
         EXPIRED,
