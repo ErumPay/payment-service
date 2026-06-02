@@ -59,6 +59,10 @@ public class CoreService {
     private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String PG_STATUS_REJECTED = "REJECTED";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
+    private static final List<CoreEntity.PaymentStatus> PAYMENT_HISTORY_STATUSES = List.of(
+            CoreEntity.PaymentStatus.CANCEL_REQUESTED,
+            CoreEntity.PaymentStatus.PAID,
+            CoreEntity.PaymentStatus.CANCELED);
 
     private final PgClient pgClient;
     private final CardDetailRepository cardDetailRepository;
@@ -244,6 +248,7 @@ public class CoreService {
 
         CoreEntity payment = findPaymentOrThrow(paymentId);
         validatePaymentOwner(payment, userId);
+        validatePaymentHistoryStatus(payment);
         List<CardDetailEntity> cardDetails = cardDetailRepository.findAllByPaymentId(paymentId);
 
         return toPaymentDetailResponse(payment, cardDetails);
@@ -259,10 +264,7 @@ public class CoreService {
 
     private List<CoreEntity.PaymentStatus> resolvePaymentListStatuses(String status) {
         if (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status.trim())) {
-            return List.of(
-                    CoreEntity.PaymentStatus.CANCEL_REQUESTED,
-                    CoreEntity.PaymentStatus.PAID,
-                    CoreEntity.PaymentStatus.CANCELED);
+            return PAYMENT_HISTORY_STATUSES;
         }
 
         return switch (status.trim().toUpperCase()) {
@@ -270,6 +272,12 @@ public class CoreService {
             case "CANCELED" -> List.of(CoreEntity.PaymentStatus.CANCELED);
             default -> throw new CustomException(ErrorCode.BAD_REQUEST);
         };
+    }
+
+    private void validatePaymentHistoryStatus(CoreEntity payment) {
+        if (!PAYMENT_HISTORY_STATUSES.contains(payment.getPayment_status())) {
+            throw new CustomException(ErrorCode.PAY_NOT_FOUND);
+        }
     }
 
     private CoreEntity findPaymentOrThrow(Long paymentId) {
