@@ -10,6 +10,7 @@ import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
 import com.erumpay.payment.core.domain.dto.CanceledResponse;
 import com.erumpay.payment.core.domain.dto.DutchMemberPrepareRequest;
+import com.erumpay.payment.core.domain.dto.PaymentDetailResponse;
 import com.erumpay.payment.core.domain.dto.PaymentListResonse;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -130,6 +131,15 @@ public class CoreController {
             @RequestParam(name = "sortBy", defaultValue = "paidAt") String sortBy,
             @RequestParam(name = "direction", defaultValue = "desc") String direction) {
         return ResponseEntity.ok(coreService.getAllPayments(userId, page, sortBy, direction));
+    }
+
+    @GetMapping("/{paymentId}")
+    @Operation(summary = "특정 결제 내역 조회", description = "결제된 내역 1개를 조회한다.")
+    public ResponseEntity<PaymentDetailResponse> getDetailPayment(
+            @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
+            @Parameter(description = "결제 ID", required = true) @PathVariable("paymentId") Long paymentId) {
+
+        return ResponseEntity.ok(coreService.getDetailPayment(userId, paymentId));
     }
 
 }

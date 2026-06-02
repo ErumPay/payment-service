@@ -31,6 +31,7 @@ import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.dto.CanceledResponse;
 import com.erumpay.payment.core.domain.dto.CoreSseEventType;
 import com.erumpay.payment.core.domain.dto.DutchMemberPrepareRequest;
+import com.erumpay.payment.core.domain.dto.PaymentDetailResponse;
 import com.erumpay.payment.core.domain.dto.PaymentListResonse;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
@@ -230,6 +231,19 @@ public class CoreService {
                 .size((long) paymentSlice.getSize())
                 .hasNext(paymentSlice.hasNext())
                 .build();
+    }
+
+    // [be] 다윤 260602 10:00 | 결제 내역 단일 조회
+    @Transactional(readOnly = true)
+    public PaymentDetailResponse getDetailPayment(Long userId, Long paymentId) {
+        if (userId == null || paymentId == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        CoreEntity payment = findPaymentOrThrow(paymentId);
+        validatePaymentOwner(payment, userId);
+
+        return toPaymentDetailResponse(payment);
     }
 
     private Pageable buildPaymentPageable(int page, int size, String sortBy, String direction) {
@@ -535,6 +549,21 @@ public class CoreService {
                 .amount(payment.getAmount())
                 .orderName(payment.getOrder_name())
                 .paidAt(payment.getPaidAt())
+                .build();
+    }
+
+    private PaymentDetailResponse toPaymentDetailResponse(CoreEntity payment) {
+        return PaymentDetailResponse.builder()
+                .userId(payment.getUserId())
+                .paymentId(payment.getPaymentId())
+                .paymentType(payment.getPayment_type() == null ? null : payment.getPayment_type().name())
+                .strategyType(payment.getPayment_intent() == null ? null : payment.getPayment_intent().name())
+                .status(payment.getPayment_status() == null ? null : payment.getPayment_status().name())
+                .amount(payment.getAmount())
+                .orderName(payment.getOrder_name())
+                .orderNo(payment.getOrder_no())
+                .paidAt(payment.getPaidAt())
+                .canceledAt(payment.getCanceled_at())
                 .build();
     }
 
