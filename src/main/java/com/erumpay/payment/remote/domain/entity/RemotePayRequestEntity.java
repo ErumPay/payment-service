@@ -107,7 +107,10 @@ public class RemotePayRequestEntity {
         if (payment.getPaymentId() == null || payment.getAmount() == null || payment.getAmount() <= 0) {
             throw new IllegalArgumentException("payment must be persisted and have a positive amount");
         }
-        if (payment.getUserId() == null || !targetUserId.equals(payment.getUserId())) {
+        if (payment.getChannel_type() != CoreEntity.ChannelType.ONLINE) {
+            throw new IllegalArgumentException("remote payment requires online payment");
+        }
+        if (payment.getUserId() != null && !targetUserId.equals(payment.getUserId())) {
             throw new IllegalArgumentException("payment user must match remote payment target");
         }
         if (requesterUserId.equals(targetUserId)) {
