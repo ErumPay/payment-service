@@ -2,6 +2,8 @@ package com.erumpay.payment.core.dao;
 
 import java.util.Optional;
 
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -29,4 +31,6 @@ public interface CoreRepository extends JpaRepository<CoreEntity, Long> {
     Optional<CoreEntity> findByPaymentIdAndMerchantId(
             @Param("paymentId") Long paymentId,
             @Param("merchantId") Long merchantId);
+
+    Slice<CoreEntity> findAllByUserId(Long userId, Pageable pageable);
 }

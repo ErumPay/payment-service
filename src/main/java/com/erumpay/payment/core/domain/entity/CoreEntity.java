@@ -74,7 +74,10 @@ public class CoreEntity {
     @Enumerated(EnumType.STRING)
     private FailCode fail_code;
     private LocalDateTime updated_at;
-    private LocalDateTime paid_at;
+
+    @Column(name = "paid_at")
+    private LocalDateTime paidAt;
+
     private LocalDateTime canceled_at;
 
     // [be] 다윤 260526 결제 요청 status 업데이트
@@ -129,7 +132,7 @@ public class CoreEntity {
             throw new IllegalArgumentException("paidAt must not be null");
         }
         this.payment_status = PaymentStatus.PAID;
-        this.paid_at = paidAt;
+        this.paidAt = paidAt;
         this.updated_at = paidAt;
     }
 

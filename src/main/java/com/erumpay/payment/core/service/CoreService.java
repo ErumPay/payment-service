@@ -2,10 +2,16 @@ package com.erumpay.payment.core.service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.Slice;
+import org.springframework.data.jpa.domain.JpaSort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -25,6 +31,7 @@ import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.dto.CanceledResponse;
 import com.erumpay.payment.core.domain.dto.CoreSseEventType;
 import com.erumpay.payment.core.domain.dto.DutchMemberPrepareRequest;
+import com.erumpay.payment.core.domain.dto.PaymentListResonse;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
 import com.erumpay.payment.core.domain.dto.PrepareRequest;
@@ -204,6 +211,66 @@ public class CoreService {
         return toCanceledResponse(payment.getPaymentId(), payment.getPayment_status(), canceledAt);
     }
 
+    // [be] 다윤 260602 10:00 | 결제 내역 전체 조회
+    @Transactional(readOnly = true)
+    public PaymentListResonse getAllPayments(Long userId, int page, String sortBy, String direction) {
+        if (userId == null || page < 0) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        int size = 20;
+        Pageable pageable = buildPaymentPageable(page, size, sortBy, direction);
+        Slice<CoreEntity> paymentSlice = coreRepository.findAllByUserId(userId, pageable);
+
+        return PaymentListResonse.builder()
+                .items(paymentSlice.getContent().stream()
+                        .map(this::toPaymentItem)
+                        .toList())
+                .page((long) paymentSlice.getNumber())
+                .size((long) paymentSlice.getSize())
+                .hasNext(paymentSlice.hasNext())
+                .build();
+    }
+
+    private Pageable buildPaymentPageable(int page, int size, String sortBy, String direction) {
+        Sort.Direction sortDirection = parseSortDirection(direction);
+        String sortProperty = resolvePaymentSortProperty(sortBy);
+
+        return PageRequest.of(
+                page,
+                size,
+                JpaSort.unsafe(sortDirection, sortProperty)
+                        .and(Sort.by(Sort.Direction.DESC, "paymentId")));
+    }
+
+    private Sort.Direction parseSortDirection(String direction) {
+        if (direction == null || direction.isBlank()) {
+            return Sort.Direction.DESC;
+        }
+
+        try {
+            return Sort.Direction.valueOf(direction.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+    }
+
+    private String resolvePaymentSortProperty(String sortBy) {
+        if (sortBy == null || sortBy.isBlank()) {
+            return "paidAt";
+        }
+
+        return switch (sortBy.trim().toLowerCase(Locale.ROOT)) {
+            case "paidat", "paid_at" -> "paidAt";
+            case "createdat", "created_at" -> "created_at";
+            case "amount" -> "amount";
+            case "ordername", "order_name" -> "order_name";
+            case "status", "paymentstatus", "payment_status" -> "payment_status";
+            case "paymenttype", "payment_type", "type" -> "payment_type";
+            default -> throw new CustomException(ErrorCode.BAD_REQUEST);
+        };
+    }
+
     private CoreEntity findPaymentOrThrow(Long paymentId) {
         return coreRepository.findById(paymentId)
                 .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
@@ -221,7 +288,8 @@ public class CoreService {
         }
     }
 
-    private Optional<ResponseEntity<PrepareResponse>> findReplayedPrepareResponse(Long userId, String normalizedIdempotencyKey) {
+    private Optional<ResponseEntity<PrepareResponse>> findReplayedPrepareResponse(Long userId,
+            String normalizedIdempotencyKey) {
         return coreValidationService.validateIdempotency(userId, normalizedIdempotencyKey);
     }
 
@@ -458,6 +526,18 @@ public class CoreService {
                 .build();
     }
 
+    private PaymentListResonse.PaymentItem toPaymentItem(CoreEntity payment) {
+        return PaymentListResonse.PaymentItem.builder()
+                .paymentId(payment.getPaymentId())
+                .paymentType(payment.getPayment_type().name())
+                .strategyType(payment.getPayment_intent() == null ? null : payment.getPayment_intent().name())
+                .status(payment.getPayment_status().name())
+                .amount(payment.getAmount())
+                .orderName(payment.getOrder_name())
+                .paidAt(payment.getPaidAt())
+                .build();
+    }
+
     private PrepareResponse toPrepareResponse(CoreEntity payment) {
         return PrepareResponse.builder()
                 .paymentId(payment.getPaymentId())
@@ -483,7 +563,8 @@ public class CoreService {
                     createDutchPaymentEntity(userId, normalizedIdempotencyKey, request, now, dutchRole, paymentIntent));
             return DutchPaymentSaveOutcome.saved(payment);
         } catch (DataIntegrityViolationException e) {
-            Optional<ResponseEntity<PrepareResponse>> replayed = findReplayedPrepareResponse(userId, normalizedIdempotencyKey);
+            Optional<ResponseEntity<PrepareResponse>> replayed = findReplayedPrepareResponse(userId,
+                    normalizedIdempotencyKey);
             if (replayed.isPresent()) {
                 return DutchPaymentSaveOutcome.replayed(replayed.get());
             }
