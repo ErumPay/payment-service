@@ -24,7 +24,7 @@ public class CoreSseRedisSubscriber implements MessageListener {
     @Override
     public void onMessage(Message message, byte[] pattern) {
         String body = new String(message.getBody(), StandardCharsets.UTF_8);
-        log.info("onMessage called.");
+        // log.info("onMessage called.");
 
         try {
             CoreSseRedisMessage redisMessage = objectMapper.readValue(body, CoreSseRedisMessage.class);

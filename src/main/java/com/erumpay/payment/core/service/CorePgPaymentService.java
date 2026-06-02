@@ -17,6 +17,7 @@ import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayHostFinalPaymentResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequest;
 import com.erumpay.payment.dutch.service.DutchPayService;
 
@@ -169,6 +170,7 @@ public class CorePgPaymentService {
                     e);
         }
         notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
+        notifyHostFinalPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
     }
 
     // [be] 다윤 260601 20:00 | 결제 실패 시 원장기록, 가승인의 경우 더치에게 가승인 실패 전달
@@ -389,11 +391,57 @@ public class CorePgPaymentService {
         }
     }
 
+    // [be] 다윤 260602 | 대표자 최종 결제 완료 여부를 더치에게 전달
+    private void notifyHostFinalPaymentResultIfNeeded(
+            CoreEntity payment,
+            String status,
+            PgAuthPayResponse pgResponse) {
+
+        log.info("host final payment result: {}", status);
+
+        if (!shouldNotifyHostFinalPaymentResult(payment)) {
+            return;
+        }
+
+        if (payment.getDutch_session_id() == null || payment.getUserId() == null) {
+            log.error("host final payment result notify skipped. paymentId={}, sessionId={}, userId={}, failCode={}",
+                    payment.getPaymentId(),
+                    payment.getDutch_session_id(),
+                    payment.getUserId(),
+                    pgResponse == null ? null : pgResponse.getFailureCode());
+            return;
+        }
+
+        try {
+            dutchPayService.applyHostFinalPaymentResult(
+                    payment.getDutch_session_id(),
+                    DutchPayHostFinalPaymentResultRequest.builder()
+                            .user_id(payment.getUserId())
+                            .payment_id(payment.getPaymentId())
+                            .status(status)
+                            .build());
+        } catch (RuntimeException e) {
+            log.error("host final payment result notify failed. paymentId={}, sessionId={}, userId={}, failCode={}",
+                    payment.getPaymentId(),
+                    payment.getDutch_session_id(),
+                    payment.getUserId(),
+                    pgResponse == null ? null : pgResponse.getFailureCode(),
+                    e);
+        }
+    }
+
     // [be] 다윤 260601 20:00 | 더치페이 여부 판단
     private boolean shouldNotifyParticipantPaymentResult(CoreEntity payment) {
         if (payment.getPayment_type() != CoreEntity.PaymentType.DUTCH) {
             return false;
         }
         return payment.getPayment_intent() == CoreEntity.PaymentIntent.DUTCH_MEMBER_PAY;
+    }
+
+    private boolean shouldNotifyHostFinalPaymentResult(CoreEntity payment) {
+        if (payment.getPayment_type() != CoreEntity.PaymentType.DUTCH) {
+            return false;
+        }
+        return payment.getPayment_intent() == CoreEntity.PaymentIntent.DUTCH_HOST_PAY;
     }
 }
