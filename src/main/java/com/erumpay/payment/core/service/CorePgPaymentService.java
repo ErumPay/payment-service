@@ -19,6 +19,7 @@ import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequest;
 import com.erumpay.payment.dutch.service.DutchPayService;
+import com.erumpay.payment.remote.service.RemotePayService;
 
 import feign.FeignException;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,7 @@ public class CorePgPaymentService {
     private final PgClient pgClient;
     private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
     private final DutchPayService dutchPayService;
+    private final RemotePayService remotePayService;
     private final CardClient cardClient;
 
     // [be] 다윤 260601 20:00 | pg 에게 결제 요청 진입점
@@ -169,6 +171,7 @@ public class CorePgPaymentService {
                     e);
         }
         notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
+        notifyRemotePaymentResultIfNeeded(payment);
     }
 
     // [be] 다윤 260601 20:00 | 결제 실패 시 원장기록, 가승인의 경우 더치에게 가승인 실패 전달
@@ -395,5 +398,20 @@ public class CorePgPaymentService {
             return false;
         }
         return payment.getPayment_intent() == CoreEntity.PaymentIntent.DUTCH_MEMBER_PAY;
+    }
+
+    private void notifyRemotePaymentResultIfNeeded(CoreEntity payment) {
+        if (payment.getPayment_type() != CoreEntity.PaymentType.REMOTE) {
+            return;
+        }
+
+        try {
+            remotePayService.completeByPayment(payment);
+        } catch (RuntimeException e) {
+            log.error("remote payment result notify failed. paymentId={}, userId={}",
+                    payment.getPaymentId(),
+                    payment.getUserId(),
+                    e);
+        }
     }
 }
