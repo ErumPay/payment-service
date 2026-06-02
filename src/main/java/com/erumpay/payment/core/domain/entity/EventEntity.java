@@ -44,6 +44,7 @@ public class EventEntity {
         AUTHORIZED,
         PAID,
         CANCEL_REQUESTED,
+        VOIDED,
         CANCELED,
         FAILED,
         EXPIRED

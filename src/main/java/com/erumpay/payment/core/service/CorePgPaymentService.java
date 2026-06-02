@@ -1,8 +1,10 @@
 package com.erumpay.payment.core.service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import com.erumpay.payment.core.client.card.CardClient;
@@ -10,15 +12,19 @@ import com.erumpay.payment.core.client.card.dto.CardBillingKeyResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
+import com.erumpay.payment.core.client.pg.dto.PgPayCancelRequest;
+import com.erumpay.payment.core.dao.EventRepository;
 import com.erumpay.payment.core.domain.dto.CoreSseEventType;
 import com.erumpay.payment.core.domain.dto.PaidCardRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
+import com.erumpay.payment.core.domain.entity.EventEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostFinalPaymentResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPaySessionDetailResponse;
 import com.erumpay.payment.dutch.service.DutchPayService;
 
 import feign.FeignException;
@@ -42,6 +48,7 @@ public class CorePgPaymentService {
     private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
     private final DutchPayService dutchPayService;
     private final CardClient cardClient;
+    private final EventRepository eventRepository;
 
     // [be] 다윤 260601 20:00 | pg 에게 결제 요청 진입점
     public void requestPgPayments(CoreEntity payment, PinAndPayRequest request) {
@@ -391,7 +398,7 @@ public class CorePgPaymentService {
         }
     }
 
-    // [be] 다윤 260602 | 대표자 최종 결제 완료 여부를 더치에게 전달
+    // [be] 다윤 260602 | 대표자 최종 결제 완료 여부를 더치에게 전달, pg로 void 요청
     private void notifyHostFinalPaymentResultIfNeeded(
             CoreEntity payment,
             String status,
@@ -413,13 +420,14 @@ public class CorePgPaymentService {
         }
 
         try {
-            dutchPayService.applyHostFinalPaymentResult(
+            DutchPaySessionDetailResponse sessionDetail = dutchPayService.applyHostFinalPaymentResult(
                     payment.getDutch_session_id(),
                     DutchPayHostFinalPaymentResultRequest.builder()
                             .user_id(payment.getUserId())
                             .payment_id(payment.getPaymentId())
                             .status(status)
                             .build());
+            voidHostAuthorizationIfNeeded(payment, sessionDetail);
         } catch (RuntimeException e) {
             log.error("host final payment result notify failed. paymentId={}, sessionId={}, userId={}, failCode={}",
                     payment.getPaymentId(),
@@ -427,6 +435,56 @@ public class CorePgPaymentService {
                     payment.getUserId(),
                     pgResponse == null ? null : pgResponse.getFailureCode(),
                     e);
+        }
+    }
+
+    // [be] 다윤 260602 18:00 | pg로 대표자 authorized에 대한 결제 건 void 처리 요청
+    private void voidHostAuthorizationIfNeeded(
+            CoreEntity finalPayment,
+            DutchPaySessionDetailResponse sessionDetail) {
+        if (sessionDetail == null || sessionDetail.getHost_auth_payment_id() == null) {
+            log.error("host auth void skipped. finalPaymentId={}, sessionId={}, hostAuthPaymentId=null",
+                    finalPayment.getPaymentId(),
+                    finalPayment.getDutch_session_id());
+            return;
+        }
+
+        Long hostAuthPaymentId = sessionDetail.getHost_auth_payment_id();
+        Long hostAuthPgTxnId = findHostAuthPgTxnId(hostAuthPaymentId);
+        PgPayCancelRequest authCancelRequest = PgPayCancelRequest.builder()
+                .payPaymentId(hostAuthPaymentId)
+                .merchantId(finalPayment.getMerchant_id())
+                .voidReason("DUTCHPAY_COMPLETED")
+                .build();
+        String voidIdempotencyKey = finalPayment.getIdempotencyKey() + "-void-" + hostAuthPaymentId;
+
+        PgAuthPayResponse pgResponse = pgClient.pgPaymentAuthCancelRequest(
+                AUTHORIZATION,
+                voidIdempotencyKey,
+                hostAuthPgTxnId,
+                authCancelRequest);
+        validatePgAuthCancelResponse(pgResponse);
+        corePgPaymentPersistenceService.markVoidedAndSaveEvent(hostAuthPaymentId, pgResponse);
+    }
+
+    private Long findHostAuthPgTxnId(Long hostAuthPaymentId) {
+        List<EventEntity> authorizedEvents = eventRepository.findPgTxnEventsByPaymentIdAndEventType(
+                hostAuthPaymentId,
+                EventEntity.EventType.AUTHORIZED,
+                PageRequest.of(0, 1));
+        if (authorizedEvents.isEmpty()) {
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+        }
+        return authorizedEvents.get(0).getPg_txn_id();
+    }
+
+    private void validatePgAuthCancelResponse(PgAuthPayResponse pgResponse) {
+        if (pgResponse == null || pgResponse.getStatus() == null) {
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+        }
+
+        if (PG_STATUS_REJECTED.equalsIgnoreCase(pgResponse.getStatus())) {
+            throw new CustomException(ErrorCode.CANCELED_PG_REJECTED);
         }
     }
 
