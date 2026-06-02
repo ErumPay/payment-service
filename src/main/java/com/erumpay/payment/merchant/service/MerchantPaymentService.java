@@ -85,7 +85,7 @@ public class MerchantPaymentService {
             return MerchantCancelResponse.builder()
                     .paymentId(payment.getPaymentId())
                     .status(payment.getPayment_status().name())
-                    .canceledAt(payment.getCanceled_at())
+                    .canceledAt(payment.getCanceledAt())
                     .build();
         }
 
@@ -155,7 +155,7 @@ public class MerchantPaymentService {
                 .payment_status(CoreEntity.PaymentStatus.CREATED)
                 .idempotencyKey(idempotencyKey)
                 .created_at(now)
-                .updated_at(now)
+                .updatedAt(now)
                 .build();
 
         CoreEntity savedPayment = coreRepository.saveAndFlush(payment);

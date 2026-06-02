@@ -1,6 +1,7 @@
 package com.erumpay.payment.core.domain.dto;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -27,5 +28,22 @@ public class PaymentDetailResponse {
     private String orderNo;
     private LocalDateTime paidAt;
     private LocalDateTime canceledAt;
+    private List<CardItem> cards;
+
+    @Builder
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @ToString
+    public static class CardItem {
+        private Long paymentCardId;
+        private Long cardId;
+        private String cardName;
+        private String maskedNumber;
+        private Long paidAmount;
+        private Long discountAmount;
+        private String benefitDesc;
+
+    }
 
 }

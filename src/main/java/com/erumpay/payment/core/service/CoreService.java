@@ -2,7 +2,6 @@ package com.erumpay.payment.core.service;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -11,7 +10,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Slice;
-import org.springframework.data.jpa.domain.JpaSort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -199,7 +197,7 @@ public class CoreService {
         validatePaymentOwnerOrUnassigned(payment, userId);
 
         if (payment.getPayment_status() == CoreEntity.PaymentStatus.CANCELED) {
-            return toCanceledResponse(payment.getPaymentId(), payment.getPayment_status(), payment.getCanceled_at());
+            return toCanceledResponse(payment.getPaymentId(), payment.getPayment_status(), payment.getCanceledAt());
         }
 
         validateCancelableStatus(payment.getPayment_status());
@@ -214,14 +212,18 @@ public class CoreService {
 
     // [be] 다윤 260602 10:00 | 결제 내역 전체 조회
     @Transactional(readOnly = true)
-    public PaymentListResonse getAllPayments(Long userId, int page, String sortBy, String direction) {
+    public PaymentListResonse getAllPayments(Long userId, int page, String status) {
         if (userId == null || page < 0) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
 
         int size = 20;
-        Pageable pageable = buildPaymentPageable(page, size, sortBy, direction);
-        Slice<CoreEntity> paymentSlice = coreRepository.findAllByUserId(userId, pageable);
+        Pageable pageable = buildPaymentPageable(page, size);
+        List<CoreEntity.PaymentStatus> paymentStatuses = resolvePaymentListStatuses(status);
+        Slice<CoreEntity> paymentSlice = coreRepository.findAllByUserIdAndPaymentStatuses(
+                userId,
+                paymentStatuses,
+                pageable);
 
         return PaymentListResonse.builder()
                 .items(paymentSlice.getContent().stream()
@@ -242,45 +244,30 @@ public class CoreService {
 
         CoreEntity payment = findPaymentOrThrow(paymentId);
         validatePaymentOwner(payment, userId);
+        List<CardDetailEntity> cardDetails = cardDetailRepository.findAllByPaymentId(paymentId);
 
-        return toPaymentDetailResponse(payment);
+        return toPaymentDetailResponse(payment, cardDetails);
     }
 
-    private Pageable buildPaymentPageable(int page, int size, String sortBy, String direction) {
-        Sort.Direction sortDirection = parseSortDirection(direction);
-        String sortProperty = resolvePaymentSortProperty(sortBy);
-
+    private Pageable buildPaymentPageable(int page, int size) {
         return PageRequest.of(
                 page,
                 size,
-                JpaSort.unsafe(sortDirection, sortProperty)
+                Sort.by(Sort.Direction.DESC, "updatedAt")
                         .and(Sort.by(Sort.Direction.DESC, "paymentId")));
     }
 
-    private Sort.Direction parseSortDirection(String direction) {
-        if (direction == null || direction.isBlank()) {
-            return Sort.Direction.DESC;
+    private List<CoreEntity.PaymentStatus> resolvePaymentListStatuses(String status) {
+        if (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status.trim())) {
+            return List.of(
+                    CoreEntity.PaymentStatus.CANCEL_REQUESTED,
+                    CoreEntity.PaymentStatus.PAID,
+                    CoreEntity.PaymentStatus.CANCELED);
         }
 
-        try {
-            return Sort.Direction.valueOf(direction.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
-        }
-    }
-
-    private String resolvePaymentSortProperty(String sortBy) {
-        if (sortBy == null || sortBy.isBlank()) {
-            return "paidAt";
-        }
-
-        return switch (sortBy.trim().toLowerCase(Locale.ROOT)) {
-            case "paidat", "paid_at" -> "paidAt";
-            case "createdat", "created_at" -> "created_at";
-            case "amount" -> "amount";
-            case "ordername", "order_name" -> "order_name";
-            case "status", "paymentstatus", "payment_status" -> "payment_status";
-            case "paymenttype", "payment_type", "type" -> "payment_type";
+        return switch (status.trim().toUpperCase()) {
+            case "PAID" -> List.of(CoreEntity.PaymentStatus.PAID);
+            case "CANCELED" -> List.of(CoreEntity.PaymentStatus.CANCELED);
             default -> throw new CustomException(ErrorCode.BAD_REQUEST);
         };
     }
@@ -552,18 +539,33 @@ public class CoreService {
                 .build();
     }
 
-    private PaymentDetailResponse toPaymentDetailResponse(CoreEntity payment) {
+    private PaymentDetailResponse toPaymentDetailResponse(CoreEntity payment, List<CardDetailEntity> cardDetails) {
         return PaymentDetailResponse.builder()
                 .userId(payment.getUserId())
                 .paymentId(payment.getPaymentId())
-                .paymentType(payment.getPayment_type() == null ? null : payment.getPayment_type().name())
+                .paymentType(payment.getPayment_type().name())
                 .strategyType(payment.getPayment_intent() == null ? null : payment.getPayment_intent().name())
-                .status(payment.getPayment_status() == null ? null : payment.getPayment_status().name())
+                .status(payment.getPayment_status().name())
                 .amount(payment.getAmount())
                 .orderName(payment.getOrder_name())
                 .orderNo(payment.getOrder_no())
-                .paidAt(payment.getPaidAt())
-                .canceledAt(payment.getCanceled_at())
+                .paidAt(payment.getPaidAt() == null ? payment.getUpdatedAt() : payment.getPaidAt())
+                .canceledAt(payment.getCanceledAt())
+                .cards(cardDetails.stream()
+                        .map(this::toPaymentCardItem)
+                        .toList())
+                .build();
+    }
+
+    private PaymentDetailResponse.CardItem toPaymentCardItem(CardDetailEntity cardDetail) {
+        return PaymentDetailResponse.CardItem.builder()
+                .paymentCardId(cardDetail.getPayment_card_id())
+                .cardId(cardDetail.getCard_id())
+                .cardName(cardDetail.getCard_name())
+                .maskedNumber(cardDetail.getMasked_number())
+                .paidAmount(cardDetail.getPaid_amount())
+                .discountAmount(cardDetail.getDiscount_amount())
+                .benefitDesc(cardDetail.getBenefit_desc())
                 .build();
     }
 
@@ -621,7 +623,7 @@ public class CoreService {
                 .dutch_role(dutchRole)
                 .payment_intent(paymentIntent)
                 .dutch_session_id(request.getSessionId())
-                .updated_at(now)
+                .updatedAt(now)
                 .created_at(now)
                 .build();
     }

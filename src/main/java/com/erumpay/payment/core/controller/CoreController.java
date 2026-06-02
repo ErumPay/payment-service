@@ -124,13 +124,12 @@ public class CoreController {
     }
 
     @GetMapping
-    @Operation(summary = "결제 내역 전체 조회", description = "결제된 내역을 전체 조회한다.")
+    @Operation(summary = "결제 내역 전체 조회", description = "내 결제 내역을 조회한다. status는 ALL, PAID, CANCELED만 지원하며, ALL 조회에는 CANCEL_REQUESTED, PAID, CANCELED 상태가 포함된다. 정렬은 updatedAt 내림차순으로 고정된다.")
     public ResponseEntity<PaymentListResonse> getAllPayments(
             @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
-            @RequestParam(name = "page", defaultValue = "0") int page,
-            @RequestParam(name = "sortBy", defaultValue = "paidAt") String sortBy,
-            @RequestParam(name = "direction", defaultValue = "desc") String direction) {
-        return ResponseEntity.ok(coreService.getAllPayments(userId, page, sortBy, direction));
+            @Parameter(description = "조회할 페이지 번호. 0부터 시작", required = false, example = "0") @RequestParam(name = "page", defaultValue = "0") int page,
+            @Parameter(description = "조회할 결제 상태. ALL, PAID, CANCELED만 지원", required = false, example = "ALL") @RequestParam(name = "status", defaultValue = "ALL") String status) {
+        return ResponseEntity.ok(coreService.getAllPayments(userId, page, status));
     }
 
     @GetMapping("/{paymentId}")
