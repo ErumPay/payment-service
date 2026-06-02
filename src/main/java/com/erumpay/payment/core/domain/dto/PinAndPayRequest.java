@@ -24,12 +24,12 @@ public class PinAndPayRequest {
     private String pin;
 
     @NotNull
-    @Schema(description = "결제 ID", example = "10001")
+    @Schema(description = "결제 ID", example = "1")
     private Long paymentId;
 
     @NotNull
     @Positive
-    @Schema(description = "총 결제 금액", example = "15000")
+    @Schema(description = "총 결제 금액(card.amount의 합과 일치해야 함)", example = "10000")
     private Long totalAmount;
 
     @NotEmpty

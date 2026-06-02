@@ -73,7 +73,7 @@ public class CoreSseService {
 
     // [be] 다윤 260601 | 코어 SSE 전파 진입점: 상태 변경 이벤트를 Redis Pub/Sub로 모든 인스턴스에 전달한다.
     public void publishPaymentUpdated(Long paymentId, CoreSseEventType eventType, Object payload) {
-        log.info("publishPaymentUpdated called.");
+        // log.info("publishPaymentUpdated called.");
         CoreSseEventResponse event = CoreSseEventResponse.of(eventType, paymentId, payload);
         cacheRecommendationEventIfNeeded(paymentId, event);
 
@@ -91,7 +91,7 @@ public class CoreSseService {
 
     // [be] 다윤 260601 | Redis에서 전달된 코어 SSE 이벤트를 현재 인스턴스의 로컬 SSE 연결에 전송한다.
     public void applyPaymentUpdatedFromRedis(Long paymentId, CoreSseEventResponse event) {
-        log.info("applyPaymentUpdatedFromRedis called.");
+        // log.info("applyPaymentUpdatedFromRedis called.");
         cacheRecommendationEventIfNeeded(paymentId, event);
         sendLocalPaymentUpdated(paymentId, event);
 
@@ -102,7 +102,7 @@ public class CoreSseService {
 
     // [be] 다윤 260601 | 현재 인스턴스에 연결된 구독자에게만 payment-updated 이벤트를 보낸다.
     public void sendLocalPaymentUpdated(Long paymentId, CoreSseEventResponse event) {
-        log.info("sendLocalPaymentUpdated called.");
+        // log.info("sendLocalPaymentUpdated called.");
         List<SseEmitter> emitterList = emitters.get(paymentId);
         if (emitterList == null || emitterList.isEmpty())
             return;

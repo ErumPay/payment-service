@@ -18,19 +18,16 @@ import lombok.ToString;
 public class PrepareRequest {
 
     @NotNull
-    @Schema(description = "결제 ID", example = "10001")
+    @Schema(description = "결제 ID", example = "1")
     private Long paymentId;
 
     @NotNull
     @Positive
-    @Schema(description = "결제 금액", example = "15000")
+    @Schema(description = "결제 금액", example = "10000")
     private Long amount;
 
     @NotBlank
     @Schema(description = "결제 타입", example = "SINGLE/DUTCH/REMOTE")
     private String paymentType;
-
-    @Schema(description = "더치 결제 역할 (더치 결제 시)", example = "HOST/MEMBER")
-    private String dutchRole;
 
 }

@@ -166,6 +166,15 @@ public class CoreEntity {
         this.updatedAt = canceledAt;
     }
 
+    public void authVoidedStatusUpdatePayment(LocalDateTime voidedAt) {
+        if (voidedAt == null) {
+            throw new IllegalArgumentException("voidedAt must not be null");
+        }
+        this.payment_status = PaymentStatus.VOIDED;
+        this.canceledAt = voidedAt;
+        this.updatedAt = voidedAt;
+    }
+
     // [be] 다윤 260526 QR 생성시 new entity 생성
     public static CoreEntity toEntity(
             String orderNo,
