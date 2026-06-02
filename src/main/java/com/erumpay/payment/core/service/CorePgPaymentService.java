@@ -40,6 +40,7 @@ public class CorePgPaymentService {
     private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String PG_STATUS_APPROVED = "APPROVED";
     private static final String PG_STATUS_REJECTED = "REJECTED";
+    private static final String PG_STATUS_VOIDED = "VOIDED";
     private static final String HOST_AUTH_STATUS_AUTHORIZED = "AUTHORIZED";
     private static final String HOST_AUTH_STATUS_FAILED = "FAILED";
     private static final String PARTICIPANT_PAYMENT_STATUS_PAID = "PAID";
@@ -483,8 +484,8 @@ public class CorePgPaymentService {
             throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
         }
 
-        if (PG_STATUS_REJECTED.equalsIgnoreCase(pgResponse.getStatus())) {
-            throw new CustomException(ErrorCode.CANCELED_PG_REJECTED);
+        if (!PG_STATUS_VOIDED.equalsIgnoreCase(pgResponse.getStatus())) {
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
         }
     }
 
