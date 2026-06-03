@@ -3,6 +3,8 @@ package com.erumpay.payment.core.service;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -10,6 +12,8 @@ import org.springframework.stereotype.Service;
 
 import com.erumpay.payment.core.client.card.CardClient;
 import com.erumpay.payment.core.client.card.dto.CardBillingKeyResponse;
+import com.erumpay.payment.core.client.card.dto.CardBillingKeysRequest;
+import com.erumpay.payment.core.client.card.dto.CardBillingKeysResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
@@ -74,9 +78,11 @@ public class CorePgPaymentService {
 
         publishPendingEvent(payment.getPaymentId());
 
+        Map<Long, CardBillingKeyResponse> billingKeys = fetchBillingKeysOrThrow(payment, request.getCards());
+
         // [be] 다윤 260527 단일 카드 결제 요청만 강제
         for (PinAndPayRequest.CardPortion card : request.getCards()) {
-            CardBillingKeyResponse billingKey = fetchBillingKeyOrThrow(payment, card);
+            CardBillingKeyResponse billingKey = findBillingKeyOrThrow(payment, card, billingKeys);
             PgAuthPayResponse pgResponse = requestPgPayment(payment, card, billingKey, savedIdempotencyKey,
                     useAuthOnly);
             handlePgResponse(payment, useAuthOnly, pgResponse, card, billingKey, selectedRecommendation);
@@ -303,32 +309,41 @@ public class CorePgPaymentService {
     }
 
     // [be] 다윤 260601 20:00 | 결제할 카드의 빌링키 조회 요청 - card service feign 통신
-    private CardBillingKeyResponse fetchBillingKeyOrThrow(
+    private Map<Long, CardBillingKeyResponse> fetchBillingKeysOrThrow(
             CoreEntity payment,
-            PinAndPayRequest.CardPortion card) {
+            List<PinAndPayRequest.CardPortion> cards) {
+        List<Long> cardIds = cards.stream()
+                .map(PinAndPayRequest.CardPortion::getCardId)
+                .toList();
+
         try {
-            CardBillingKeyResponse billingKey = cardClient.billingKeyLookUp(card.getCardId(), payment.getUserId());
-            log.info(
-                    "card billing-key lookup success. paymentId={}, cardId={}, userId={}, maskedNumber={}, cardName={}",
-                    payment.getPaymentId(),
-                    card.getCardId(),
+            CardBillingKeysResponse response = cardClient.billingKeysLookUp(
                     payment.getUserId(),
-                    billingKey == null ? null : billingKey.getMaskedNumber(),
-                    billingKey == null ? "null" : billingKey.getCardName());
+                    CardBillingKeysRequest.builder()
+                            .cardIds(cardIds)
+                            .build());
+            log.info(
+                    "card billing-keys lookup success. paymentId={}, cardIds={}, userId={}, count={}",
+                    payment.getPaymentId(),
+                    cardIds,
+                    payment.getUserId(),
+                    response == null || response.getBillingKeys() == null ? 0 : response.getBillingKeys().size());
 
-            if (billingKey == null || billingKey.getBillingKey() == null || billingKey.getBillingKey().isBlank()) {
-                log.error("card billing-key is empty. paymentId={}, cardId={}, userId={}",
-                        payment.getPaymentId(), card.getCardId(), payment.getUserId());
-
+            if (response == null || response.getBillingKeys() == null
+                    || response.getBillingKeys().size() != cardIds.size()) {
+                log.error("card billing-keys response invalid. paymentId={}, cardIds={}, userId={}",
+                        payment.getPaymentId(), cardIds, payment.getUserId());
                 throw new CustomException(ErrorCode.CARD_BILLING_KEY_INVALID);
             }
-            return billingKey;
+
+            return response.getBillingKeys().stream()
+                    .collect(Collectors.toMap(CardBillingKeyResponse::getCardId, Function.identity()));
         } catch (FeignException e) {
             ErrorCode mappedError = mapCardBillingKeyError(e.status());
             log.error(
-                    "card billing-key feign error. paymentId={}, cardId={}, userId={}, status={}, mappedError={}, body={}",
+                    "card billing-keys feign error. paymentId={}, cardIds={}, userId={}, status={}, mappedError={}, body={}",
                     payment.getPaymentId(),
-                    card.getCardId(),
+                    cardIds,
                     payment.getUserId(),
                     e.status(),
                     mappedError.name(),
@@ -338,11 +353,24 @@ public class CorePgPaymentService {
         } catch (CustomException e) {
             throw e;
         } catch (Exception e) {
-            log.error("card billing-key unexpected error. paymentId={}, cardId={}, userId={}",
-                    payment.getPaymentId(), card.getCardId(), payment.getUserId(), e);
+            log.error("card billing-keys unexpected error. paymentId={}, cardIds={}, userId={}",
+                    payment.getPaymentId(), cardIds, payment.getUserId(), e);
 
             throw new CustomException(ErrorCode.INTERNAL_CARD_SERVER_ERROR, e);
         }
+    }
+
+    private CardBillingKeyResponse findBillingKeyOrThrow(
+            CoreEntity payment,
+            PinAndPayRequest.CardPortion card,
+            Map<Long, CardBillingKeyResponse> billingKeys) {
+        CardBillingKeyResponse billingKey = billingKeys.get(card.getCardId());
+        if (billingKey == null || billingKey.getBillingKey() == null || billingKey.getBillingKey().isBlank()) {
+            log.error("card billing-key is empty. paymentId={}, cardId={}, userId={}",
+                    payment.getPaymentId(), card.getCardId(), payment.getUserId());
+            throw new CustomException(ErrorCode.CARD_BILLING_KEY_INVALID);
+        }
+        return billingKey;
     }
 
     private ErrorCode mapCardBillingKeyError(int status) {
