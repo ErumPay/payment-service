@@ -66,6 +66,9 @@ pg:
   base-url: ${PG_BASE_URL}
   authorization: ${PG_AUTHORIZATION:Bearer server-test-token}
 
+checkout:
+  redirect-base-url: ${CHECKOUT_REDIRECT_BASE_URL:http://localhost:5173/checkout?token=}
+
 recommend:
   base-url: ${RECOMMEND_BASE_URL}
 

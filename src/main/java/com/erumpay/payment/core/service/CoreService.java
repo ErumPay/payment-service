@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -60,7 +61,6 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Transactional
 public class CoreService {
-    private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String PG_STATUS_REJECTED = "REJECTED";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
     private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
@@ -84,6 +84,9 @@ public class CoreService {
     private final CoreSseService coreSseService;
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate stringRedisTemplate;
+
+    @Value("${pg.authorization}")
+    private String pgAuthorization;
 
     // [be] 다윤 260526 결제 요청 시작 - 개인, 더치페이 대표자
     public ResponseEntity<PrepareResponse> preparePay(Long userId, String idempotencyKey, PrepareRequest request) {
@@ -519,7 +522,7 @@ public class CoreService {
         String cancelIdempotencyKey = normalizedIdempotencyKey + "-" + card.getPg_txn_id();
         try {
             return pgClient.pgPaymentCancelRequest(
-                    AUTHORIZATION,
+                    pgAuthorization,
                     cancelIdempotencyKey,
                     card.getPg_txn_id(),
                     cancelRequest);
