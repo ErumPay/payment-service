@@ -78,9 +78,10 @@ public class CorePgPaymentService {
 
         RecommendResponse.Result selectedRecommendation = validateRecommendationSelection(payment.getPaymentId(), request);
 
+        Map<Long, CardBillingKeyResponse> billingKeys = fetchBillingKeysOrThrow(payment, request.getCards());
+
         publishPendingEvent(payment.getPaymentId());
 
-        Map<Long, CardBillingKeyResponse> billingKeys = fetchBillingKeysOrThrow(payment, request.getCards());
         List<ApprovedCardPayment> approvedPayments = requestApprovedCardPayments(
                 payment,
                 request,
@@ -92,7 +93,7 @@ public class CorePgPaymentService {
             PgAuthPayResponse pgResponse = approvedPayments.get(0).pgResponse();
             corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
             notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
-            publishPaidEvent(payment.getPaymentId());
+            publishAuthorizedEvent(payment.getPaymentId());
             return;
         }
 
@@ -321,9 +322,9 @@ public class CorePgPaymentService {
         } catch (FeignException e) {
             log.error("pg feign error. status={}, body={}", e.status(), e.contentUTF8());
             if (e.status() >= 400 && e.status() < 500) {
-                throw new CustomException(ErrorCode.PG_PAYMENT_REJECTED);
+                throw new CustomException(ErrorCode.PG_PAYMENT_REJECTED, e);
             }
-            throw new CustomException(ErrorCode.PG_PAYMENT_FAILED);
+            throw new CustomException(ErrorCode.PG_PAYMENT_FAILED, e);
         }
     }
 
@@ -397,6 +398,14 @@ public class CorePgPaymentService {
                 paymentId,
                 CoreSseEventType.PAYMENT_PAID,
                 Map.of("status", "PAID"));
+    }
+
+    // [be] 다윤 260604 | SSE AUTHORIZED push
+    private void publishAuthorizedEvent(Long paymentId) {
+        coreSseService.publishPaymentUpdated(
+                paymentId,
+                CoreSseEventType.PAYMENT_AUTHORIZED,
+                Map.of("status", "AUTHORIZED"));
     }
 
     // [be] 다윤 260601 20:00 | SSE FAILED push
