@@ -31,4 +31,11 @@ public interface PgClient {
                         @RequestHeader("Idempotency-Key") String idempotencyKey,
                         @PathVariable("pgTxnId") Long pgTxnId,
                         @RequestBody PgPayCancelRequest request);
+
+        @PostMapping(value = "/internal/v1/pg/payments/{pgTxnId}/void", consumes = "application/json")
+        PgAuthPayResponse pgPaymentAuthCancelRequest(
+                        @RequestHeader("Authorization") String authorization,
+                        @RequestHeader("Idempotency-Key") String idempotencyKey,
+                        @PathVariable("pgTxnId") Long pgTxnId,
+                        @RequestBody PgPayCancelRequest request);
 }

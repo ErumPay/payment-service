@@ -100,6 +100,24 @@ public class CorePgPaymentPersistenceService {
         eventRepository.save(savedEvent);
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markVoidedAndSaveEvent(Long paymentId, PgAuthPayResponse pgResponse) {
+        CoreEntity payment = coreRepository.findById(paymentId)
+                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+
+        payment.authVoidedStatusUpdatePayment(LocalDateTime.now());
+
+        EventEntity savedEvent = EventEntity.builder()
+                .payment_id(payment.getPaymentId())
+                .pg_txn_id(pgResponse == null ? null : pgResponse.getPgTxnId())
+                .event_type(EventEntity.EventType.VOIDED)
+                .actor_type(EventEntity.ActorType.PG)
+                .created_at(LocalDateTime.now())
+                .build();
+
+        eventRepository.save(savedEvent);
+    }
+
     private String extractFailCode(PgAuthPayResponse pgResponse) {
         if (pgResponse == null) {
             return null;

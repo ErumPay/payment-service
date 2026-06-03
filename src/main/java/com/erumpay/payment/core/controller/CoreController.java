@@ -10,6 +10,8 @@ import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
 import com.erumpay.payment.core.domain.dto.CanceledResponse;
 import com.erumpay.payment.core.domain.dto.DutchMemberPrepareRequest;
+import com.erumpay.payment.core.domain.dto.PaymentDetailResponse;
+import com.erumpay.payment.core.domain.dto.PaymentListResonse;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.core.service.CoreSseService;
@@ -29,6 +31,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.web.bind.annotation.RequestParam;
 
 @RestController
 @RequestMapping("/api/v1/payment")
@@ -42,7 +45,7 @@ public class CoreController {
 
     // [be] 다윤 260522 개인+대표자 가승인 결제 요청
     @PostMapping("/prepare")
-    @Operation(summary = "결제 사전 승인 요청", description = "개인 단일결제 또는 대표자 가승인 결제의 사전 승인을 요청한다.")
+    @Operation(summary = "결제 생성 요청", description = "단일결제 또는 대표자 가승인 결제의 생성을 요청한다.")
     public ResponseEntity<PrepareResponse> preparePay(
             @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
             @Parameter(description = "멱등성 키", required = true) @RequestHeader("Idempotency-Key") String idempotencyKey,
@@ -55,7 +58,7 @@ public class CoreController {
 
     // [be] 다윤 260522 참여자 결제 요청
     @PostMapping("/prepare-member")
-    @Operation(summary = "참여자 결제 사전 승인 요청", description = "더치페이 참여자의 사전 승인 결제를 요청한다.")
+    @Operation(summary = "참여자 결제 생성 요청", description = "더치페이 참여자의 결제의 생성을 요청한다.")
     public ResponseEntity<PrepareResponse> prepareMember(
             @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
             @Parameter(description = "멱등성 키", required = true) @RequestHeader("Idempotency-Key") String idempotencyKey,
@@ -68,7 +71,7 @@ public class CoreController {
 
     // [be] 다윤 260528 01:00 | 대표자 실결제 요청
     @PostMapping("/prepare-host")
-    @Operation(summary = "대표자 결제 사전 승인 요청", description = "더치페이 대표자의 실결제의 사전 승인 결제를 요청한다.")
+    @Operation(summary = "대표자 실결제 생성 요청", description = "더치페이 대표자의 실결제의 결제의 생성을 요청한다.")
     public ResponseEntity<PrepareResponse> prepareHost(
             @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
             @Parameter(description = "멱등성 키", required = true) @RequestHeader("Idempotency-Key") String idempotencyKey,
@@ -95,7 +98,7 @@ public class CoreController {
 
     // [be] 다윤 260526 비밀번호 확인 및 실결제 요청
     @PostMapping("/request")
-    @Operation(summary = "비밀번호 확인 후 결제 요청", description = "결제 PIN을 검증하고 실제결제를 요청한다.")
+    @Operation(summary = "비밀번호 확인 후 결제 요청", description = "결제 PIN을 검증하고 실제 결제를 요청한다.")
     public ResponseEntity<PinAndPayResponse> requestPay(
             @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
             @Parameter(description = "멱등성 키", required = true) @RequestHeader("Idempotency-Key") String idempotencyKey,
@@ -117,6 +120,24 @@ public class CoreController {
         log.info("/payment/cancel Controller");
 
         return ResponseEntity.ok(coreService.cancelPay(userId, idempotencyKey, paymentId));
+    }
+
+    @GetMapping
+    @Operation(summary = "결제 내역 전체 조회", description = "결제된 내역 전체를 조회한다. status = (ALL, PAID, CANCELED)")
+    public ResponseEntity<PaymentListResonse> getAllPayments(
+            @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
+            @Parameter(description = "조회할 페이지 번호(start = 0)", required = false, example = "0") @RequestParam(name = "page", defaultValue = "0") int page,
+            @Parameter(description = "조회할 결제 상태(ALL, PAID, CANCELED)", required = false, example = "ALL") @RequestParam(name = "status", defaultValue = "ALL") String status) {
+        return ResponseEntity.ok(coreService.getAllPayments(userId, page, status));
+    }
+
+    @GetMapping("/{paymentId}")
+    @Operation(summary = "특정 결제 내역 조회", description = "결제된 내역 한 개를 조회한다.")
+    public ResponseEntity<PaymentDetailResponse> getDetailPayment(
+            @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
+            @Parameter(description = "결제 ID", required = true) @PathVariable("paymentId") Long paymentId) {
+
+        return ResponseEntity.ok(coreService.getDetailPayment(userId, paymentId));
     }
 
 }

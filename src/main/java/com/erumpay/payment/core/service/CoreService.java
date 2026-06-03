@@ -6,6 +6,10 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.Slice;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -25,6 +29,8 @@ import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.dto.CanceledResponse;
 import com.erumpay.payment.core.domain.dto.CoreSseEventType;
 import com.erumpay.payment.core.domain.dto.DutchMemberPrepareRequest;
+import com.erumpay.payment.core.domain.dto.PaymentDetailResponse;
+import com.erumpay.payment.core.domain.dto.PaymentListResonse;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
 import com.erumpay.payment.core.domain.dto.PrepareRequest;
@@ -53,6 +59,10 @@ public class CoreService {
     private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String PG_STATUS_REJECTED = "REJECTED";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
+    private static final List<CoreEntity.PaymentStatus> PAYMENT_HISTORY_STATUSES = List.of(
+            CoreEntity.PaymentStatus.CANCEL_REQUESTED,
+            CoreEntity.PaymentStatus.PAID,
+            CoreEntity.PaymentStatus.CANCELED);
 
     private final PgClient pgClient;
     private final CardDetailRepository cardDetailRepository;
@@ -191,7 +201,7 @@ public class CoreService {
         validatePaymentOwnerOrUnassigned(payment, userId);
 
         if (payment.getPayment_status() == CoreEntity.PaymentStatus.CANCELED) {
-            return toCanceledResponse(payment.getPaymentId(), payment.getPayment_status(), payment.getCanceled_at());
+            return toCanceledResponse(payment.getPaymentId(), payment.getPayment_status(), payment.getCanceledAt());
         }
 
         validateCancelableStatus(payment.getPayment_status());
@@ -202,6 +212,72 @@ public class CoreService {
         payment.voidedStatusUpdatePayment(canceledAt);
 
         return toCanceledResponse(payment.getPaymentId(), payment.getPayment_status(), canceledAt);
+    }
+
+    // [be] 다윤 260602 10:00 | 결제 내역 전체 조회
+    @Transactional(readOnly = true)
+    public PaymentListResonse getAllPayments(Long userId, int page, String status) {
+        if (userId == null || page < 0) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        int size = 20;
+        Pageable pageable = buildPaymentPageable(page, size);
+        List<CoreEntity.PaymentStatus> paymentStatuses = resolvePaymentListStatuses(status);
+        Slice<CoreEntity> paymentSlice = coreRepository.findAllByUserIdAndPaymentStatuses(
+                userId,
+                paymentStatuses,
+                pageable);
+
+        return PaymentListResonse.builder()
+                .items(paymentSlice.getContent().stream()
+                        .map(this::toPaymentItem)
+                        .toList())
+                .page((long) paymentSlice.getNumber())
+                .size((long) paymentSlice.getSize())
+                .hasNext(paymentSlice.hasNext())
+                .build();
+    }
+
+    // [be] 다윤 260602 10:00 | 결제 내역 단일 조회
+    @Transactional(readOnly = true)
+    public PaymentDetailResponse getDetailPayment(Long userId, Long paymentId) {
+        if (userId == null || paymentId == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        CoreEntity payment = findPaymentOrThrow(paymentId);
+        validatePaymentOwner(payment, userId);
+        validatePaymentHistoryStatus(payment);
+        List<CardDetailEntity> cardDetails = cardDetailRepository.findAllByPaymentId(paymentId);
+
+        return toPaymentDetailResponse(payment, cardDetails);
+    }
+
+    private Pageable buildPaymentPageable(int page, int size) {
+        return PageRequest.of(
+                page,
+                size,
+                Sort.by(Sort.Direction.DESC, "updatedAt")
+                        .and(Sort.by(Sort.Direction.DESC, "paymentId")));
+    }
+
+    private List<CoreEntity.PaymentStatus> resolvePaymentListStatuses(String status) {
+        if (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status.trim())) {
+            return PAYMENT_HISTORY_STATUSES;
+        }
+
+        return switch (status.trim().toUpperCase()) {
+            case "PAID" -> List.of(CoreEntity.PaymentStatus.PAID);
+            case "CANCELED" -> List.of(CoreEntity.PaymentStatus.CANCELED);
+            default -> throw new CustomException(ErrorCode.BAD_REQUEST);
+        };
+    }
+
+    private void validatePaymentHistoryStatus(CoreEntity payment) {
+        if (!PAYMENT_HISTORY_STATUSES.contains(payment.getPayment_status())) {
+            throw new CustomException(ErrorCode.PAY_NOT_FOUND);
+        }
     }
 
     private CoreEntity findPaymentOrThrow(Long paymentId) {
@@ -221,7 +297,8 @@ public class CoreService {
         }
     }
 
-    private Optional<ResponseEntity<PrepareResponse>> findReplayedPrepareResponse(Long userId, String normalizedIdempotencyKey) {
+    private Optional<ResponseEntity<PrepareResponse>> findReplayedPrepareResponse(Long userId,
+            String normalizedIdempotencyKey) {
         return coreValidationService.validateIdempotency(userId, normalizedIdempotencyKey);
     }
 
@@ -456,6 +533,48 @@ public class CoreService {
                 .build();
     }
 
+    private PaymentListResonse.PaymentItem toPaymentItem(CoreEntity payment) {
+        return PaymentListResonse.PaymentItem.builder()
+                .paymentId(payment.getPaymentId())
+                .paymentType(payment.getPayment_type().name())
+                .strategyType(payment.getPayment_intent() == null ? null : payment.getPayment_intent().name())
+                .status(payment.getPayment_status().name())
+                .amount(payment.getAmount())
+                .orderName(payment.getOrder_name())
+                .paidAt(payment.getPaidAt())
+                .build();
+    }
+
+    private PaymentDetailResponse toPaymentDetailResponse(CoreEntity payment, List<CardDetailEntity> cardDetails) {
+        return PaymentDetailResponse.builder()
+                .userId(payment.getUserId())
+                .paymentId(payment.getPaymentId())
+                .paymentType(payment.getPayment_type().name())
+                .strategyType(payment.getPayment_intent() == null ? null : payment.getPayment_intent().name())
+                .status(payment.getPayment_status().name())
+                .amount(payment.getAmount())
+                .orderName(payment.getOrder_name())
+                .orderNo(payment.getOrder_no())
+                .paidAt(payment.getPaidAt() == null ? payment.getUpdatedAt() : payment.getPaidAt())
+                .canceledAt(payment.getCanceledAt())
+                .cards(cardDetails.stream()
+                        .map(this::toPaymentCardItem)
+                        .toList())
+                .build();
+    }
+
+    private PaymentDetailResponse.CardItem toPaymentCardItem(CardDetailEntity cardDetail) {
+        return PaymentDetailResponse.CardItem.builder()
+                .paymentCardId(cardDetail.getPayment_card_id())
+                .cardId(cardDetail.getCard_id())
+                .cardName(cardDetail.getCard_name())
+                .maskedNumber(cardDetail.getMasked_number())
+                .paidAmount(cardDetail.getPaid_amount())
+                .discountAmount(cardDetail.getDiscount_amount())
+                .benefitDesc(cardDetail.getBenefit_desc())
+                .build();
+    }
+
     private PrepareResponse toPrepareResponse(CoreEntity payment) {
         return PrepareResponse.builder()
                 .paymentId(payment.getPaymentId())
@@ -481,7 +600,8 @@ public class CoreService {
                     createDutchPaymentEntity(userId, normalizedIdempotencyKey, request, now, dutchRole, paymentIntent));
             return DutchPaymentSaveOutcome.saved(payment);
         } catch (DataIntegrityViolationException e) {
-            Optional<ResponseEntity<PrepareResponse>> replayed = findReplayedPrepareResponse(userId, normalizedIdempotencyKey);
+            Optional<ResponseEntity<PrepareResponse>> replayed = findReplayedPrepareResponse(userId,
+                    normalizedIdempotencyKey);
             if (replayed.isPresent()) {
                 return DutchPaymentSaveOutcome.replayed(replayed.get());
             }
@@ -509,7 +629,7 @@ public class CoreService {
                 .dutch_role(dutchRole)
                 .payment_intent(paymentIntent)
                 .dutch_session_id(request.getSessionId())
-                .updated_at(now)
+                .updatedAt(now)
                 .created_at(now)
                 .build();
     }

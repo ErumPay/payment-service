@@ -24,7 +24,7 @@ public class DutchMemberPrepareRequest {
 
     @NotNull
     @Positive
-    @Schema(description = "더치페이 세션 ID", example = "3001")
+    @Schema(description = "더치페이 세션 ID", example = "1")
     private Long sessionId;
 
     @NotBlank

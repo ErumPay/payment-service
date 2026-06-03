@@ -14,5 +14,6 @@ public class PgPayCancelRequest {
     private Long payPaymentId;
     private Long merchantId;
     private String cancelReason;
+    private String voidReason;
 
 }

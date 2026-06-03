@@ -1,8 +1,10 @@
 package com.erumpay.payment.core.service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import com.erumpay.payment.core.client.card.CardClient;
@@ -10,14 +12,19 @@ import com.erumpay.payment.core.client.card.dto.CardBillingKeyResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
+import com.erumpay.payment.core.client.pg.dto.PgPayCancelRequest;
+import com.erumpay.payment.core.dao.EventRepository;
 import com.erumpay.payment.core.domain.dto.CoreSseEventType;
 import com.erumpay.payment.core.domain.dto.PaidCardRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
+import com.erumpay.payment.core.domain.entity.EventEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPayHostFinalPaymentResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequest;
+import com.erumpay.payment.dutch.domain.dto.DutchPaySessionDetailResponse;
 import com.erumpay.payment.dutch.service.DutchPayService;
 import com.erumpay.payment.remote.service.RemotePayService;
 
@@ -34,6 +41,7 @@ public class CorePgPaymentService {
     private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String PG_STATUS_APPROVED = "APPROVED";
     private static final String PG_STATUS_REJECTED = "REJECTED";
+    private static final String PG_STATUS_VOIDED = "VOIDED";
     private static final String HOST_AUTH_STATUS_AUTHORIZED = "AUTHORIZED";
     private static final String HOST_AUTH_STATUS_FAILED = "FAILED";
     private static final String PARTICIPANT_PAYMENT_STATUS_PAID = "PAID";
@@ -43,6 +51,7 @@ public class CorePgPaymentService {
     private final DutchPayService dutchPayService;
     private final RemotePayService remotePayService;
     private final CardClient cardClient;
+    private final EventRepository eventRepository;
 
     // [be] 다윤 260601 20:00 | pg 에게 결제 요청 진입점
     public void requestPgPayments(CoreEntity payment, PinAndPayRequest request) {
@@ -172,6 +181,7 @@ public class CorePgPaymentService {
         }
         notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
         notifyRemotePaymentResultIfNeeded(payment);
+        notifyHostFinalPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
     }
 
     // [be] 다윤 260601 20:00 | 결제 실패 시 원장기록, 가승인의 경우 더치에게 가승인 실패 전달
@@ -392,6 +402,96 @@ public class CorePgPaymentService {
         }
     }
 
+    // [be] 다윤 260602 | 대표자 최종 결제 완료 여부를 더치에게 전달, pg로 void 요청
+    private void notifyHostFinalPaymentResultIfNeeded(
+            CoreEntity payment,
+            String status,
+            PgAuthPayResponse pgResponse) {
+
+        log.info("host final payment result: {}", status);
+
+        if (!shouldNotifyHostFinalPaymentResult(payment)) {
+            return;
+        }
+
+        if (payment.getDutch_session_id() == null || payment.getUserId() == null) {
+            log.error("host final payment result notify skipped. paymentId={}, sessionId={}, userId={}, failCode={}",
+                    payment.getPaymentId(),
+                    payment.getDutch_session_id(),
+                    payment.getUserId(),
+                    pgResponse == null ? null : pgResponse.getFailureCode());
+            return;
+        }
+
+        try {
+            DutchPaySessionDetailResponse sessionDetail = dutchPayService.applyHostFinalPaymentResult(
+                    payment.getDutch_session_id(),
+                    DutchPayHostFinalPaymentResultRequest.builder()
+                            .user_id(payment.getUserId())
+                            .payment_id(payment.getPaymentId())
+                            .status(status)
+                            .build());
+            voidHostAuthorizationIfNeeded(payment, sessionDetail);
+        } catch (RuntimeException e) {
+            log.error("host final payment result notify failed. paymentId={}, sessionId={}, userId={}, failCode={}",
+                    payment.getPaymentId(),
+                    payment.getDutch_session_id(),
+                    payment.getUserId(),
+                    pgResponse == null ? null : pgResponse.getFailureCode(),
+                    e);
+        }
+    }
+
+    // [be] 다윤 260602 18:00 | pg로 대표자 authorized에 대한 결제 건 void 처리 요청
+    private void voidHostAuthorizationIfNeeded(
+            CoreEntity finalPayment,
+            DutchPaySessionDetailResponse sessionDetail) {
+        if (sessionDetail == null || sessionDetail.getHost_auth_payment_id() == null) {
+            log.error("host auth void skipped. finalPaymentId={}, sessionId={}, hostAuthPaymentId=null",
+                    finalPayment.getPaymentId(),
+                    finalPayment.getDutch_session_id());
+            return;
+        }
+
+        Long hostAuthPaymentId = sessionDetail.getHost_auth_payment_id();
+        Long hostAuthPgTxnId = findHostAuthPgTxnId(hostAuthPaymentId);
+        PgPayCancelRequest authCancelRequest = PgPayCancelRequest.builder()
+                .payPaymentId(hostAuthPaymentId)
+                .merchantId(finalPayment.getMerchant_id())
+                .voidReason("DUTCHPAY_COMPLETED")
+                .build();
+        String voidIdempotencyKey = finalPayment.getIdempotencyKey() + "-void-" + hostAuthPaymentId;
+
+        PgAuthPayResponse pgResponse = pgClient.pgPaymentAuthCancelRequest(
+                AUTHORIZATION,
+                voidIdempotencyKey,
+                hostAuthPgTxnId,
+                authCancelRequest);
+        validatePgAuthCancelResponse(pgResponse);
+        corePgPaymentPersistenceService.markVoidedAndSaveEvent(hostAuthPaymentId, pgResponse);
+    }
+
+    private Long findHostAuthPgTxnId(Long hostAuthPaymentId) {
+        List<EventEntity> authorizedEvents = eventRepository.findPgTxnEventsByPaymentIdAndEventType(
+                hostAuthPaymentId,
+                EventEntity.EventType.AUTHORIZED,
+                PageRequest.of(0, 1));
+        if (authorizedEvents.isEmpty()) {
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+        }
+        return authorizedEvents.get(0).getPg_txn_id();
+    }
+
+    private void validatePgAuthCancelResponse(PgAuthPayResponse pgResponse) {
+        if (pgResponse == null || pgResponse.getStatus() == null) {
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+        }
+
+        if (!PG_STATUS_VOIDED.equalsIgnoreCase(pgResponse.getStatus())) {
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+        }
+    }
+
     // [be] 다윤 260601 20:00 | 더치페이 여부 판단
     private boolean shouldNotifyParticipantPaymentResult(CoreEntity payment) {
         if (payment.getPayment_type() != CoreEntity.PaymentType.DUTCH) {
@@ -413,5 +513,10 @@ public class CorePgPaymentService {
                     payment.getUserId(),
                     e);
         }
+    private boolean shouldNotifyHostFinalPaymentResult(CoreEntity payment) {
+        if (payment.getPayment_type() != CoreEntity.PaymentType.DUTCH) {
+            return false;
+        }
+        return payment.getPayment_intent() == CoreEntity.PaymentIntent.DUTCH_HOST_PAY;
     }
 }
