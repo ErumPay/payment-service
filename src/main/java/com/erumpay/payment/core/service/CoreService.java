@@ -62,7 +62,9 @@ import lombok.extern.slf4j.Slf4j;
 @Transactional
 public class CoreService {
     private static final String PG_STATUS_REJECTED = "REJECTED";
-    private static final String PG_STATUS_CANCELED = "CANCELED";
+    private static final String PG_STATUS_CANCELLED = "CANCELLED";
+    private static final String PG_STATUS_FAILED = "FAILED";
+    private static final String PG_ERROR_ALREADY_CANCELLED = "PAYMENT_ALREADY_CANCELLED";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
     private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
     private static final Duration RECOMMENDATION_CACHE_TTL = Duration.ofMinutes(30);
@@ -76,6 +78,7 @@ public class CoreService {
     private final CoreRepository coreRepository;
     private final CoreValidationService coreValidationService;
     private final CorePgPaymentService corePgPaymentService;
+    private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
     private final AuthClient authClient;
     private final DutchPayService dutchPayService;
     private final QrService qrService;
@@ -505,8 +508,15 @@ public class CoreService {
             Long paymentId,
             String normalizedIdempotencyKey,
             CardDetailEntity card) {
-        PgAuthPayResponse pgResponse = requestPgCancel(payment, paymentId, normalizedIdempotencyKey, card);
-        validatePgCancelResponse(pgResponse);
+        corePgPaymentPersistenceService.markCardCancelRequested(card.getPayment_card_id());
+        try {
+            PgAuthPayResponse pgResponse = requestPgCancel(payment, paymentId, normalizedIdempotencyKey, card);
+            validatePgCancelResponse(pgResponse);
+            corePgPaymentPersistenceService.markCardCanceled(card.getPayment_card_id(), LocalDateTime.now());
+        } catch (RuntimeException e) {
+            corePgPaymentPersistenceService.markCardCancelFailed(card.getPayment_card_id());
+            throw e;
+        }
     }
 
     private PgAuthPayResponse requestPgCancel(
@@ -529,6 +539,9 @@ public class CoreService {
                     cancelRequest);
         } catch (FeignException e) {
             log.error("pg cancel feign error. status={}, body={}", e.status(), e.contentUTF8());
+            if (isPgAlreadyCancelled(e)) {
+                return alreadyCancelledPgResponse(payment, paymentId, card);
+            }
             if (e.status() >= 400 && e.status() < 500) {
                 throw new CustomException(ErrorCode.CANCELED_PG_REJECTED, e);
             }
@@ -545,9 +558,26 @@ public class CoreService {
             throw new CustomException(ErrorCode.CANCELED_PG_REJECTED);
         }
 
-        if (!PG_STATUS_CANCELED.equalsIgnoreCase(pgResponse.getStatus())) {
+        if (PG_STATUS_FAILED.equalsIgnoreCase(pgResponse.getStatus())) {
             throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
         }
+
+        if (!PG_STATUS_CANCELLED.equalsIgnoreCase(pgResponse.getStatus())) {
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+        }
+    }
+
+    private boolean isPgAlreadyCancelled(FeignException e) {
+        return e.status() == 409 && e.contentUTF8() != null && e.contentUTF8().contains(PG_ERROR_ALREADY_CANCELLED);
+    }
+
+    private PgAuthPayResponse alreadyCancelledPgResponse(CoreEntity payment, Long paymentId, CardDetailEntity card) {
+        return PgAuthPayResponse.builder()
+                .pgTxnId(card.getPg_txn_id())
+                .payPaymentId(paymentId)
+                .merchantId(payment.getMerchant_id())
+                .status(PG_STATUS_CANCELLED)
+                .build();
     }
 
     private CanceledResponse toCanceledResponse(
@@ -600,6 +630,8 @@ public class CoreService {
                 .paidAmount(cardDetail.getPaid_amount())
                 .discountAmount(cardDetail.getDiscount_amount())
                 .benefitDesc(cardDetail.getBenefit_desc())
+                .cardStatus(cardDetail.getCard_status() == null ? null : cardDetail.getCard_status().name())
+                .canceledAt(cardDetail.getCanceled_at())
                 .build();
     }
 
