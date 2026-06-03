@@ -1,5 +1,6 @@
 package com.erumpay.payment.core.service;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Slice;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -45,6 +47,8 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRe
 import com.erumpay.payment.dutch.service.DutchPayService;
 import com.erumpay.payment.qr.service.QrService;
 import com.erumpay.payment.remote.service.RemotePayService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import feign.FeignException;
 import jakarta.persistence.EntityManager;
@@ -59,6 +63,8 @@ public class CoreService {
     private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String PG_STATUS_REJECTED = "REJECTED";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
+    private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
+    private static final Duration RECOMMENDATION_CACHE_TTL = Duration.ofMinutes(30);
     private static final List<CoreEntity.PaymentStatus> PAYMENT_HISTORY_STATUSES = List.of(
             CoreEntity.PaymentStatus.CANCEL_REQUESTED,
             CoreEntity.PaymentStatus.PAID,
@@ -76,6 +82,8 @@ public class CoreService {
     private final EntityManager entityManager;
     private final RecommendClient recommendClient;
     private final CoreSseService coreSseService;
+    private final ObjectMapper objectMapper;
+    private final StringRedisTemplate stringRedisTemplate;
 
     // [be] 다윤 260526 결제 요청 시작 - 개인, 더치페이 대표자
     public ResponseEntity<PrepareResponse> preparePay(Long userId, String idempotencyKey, PrepareRequest request) {
@@ -655,7 +663,7 @@ public class CoreService {
                             .userId(userId)
                             // .merchantName(payment.getMerchant_name())
                             .merchantName("스타벅스 강남점")
-                            .mccCode("5811")
+                            .mccCode("5814")
                             .amount(payment.getAmount())
                             .build());
 
@@ -663,12 +671,15 @@ public class CoreService {
                 log.warn("recommend response is empty. paymentId={}, userId={}", payment.getPaymentId(), userId);
                 return;
             }
+            log.info("recommend list response:\n{}",
+                    objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(recommendList));
+            cacheRecommendation(payment.getPaymentId(), recommendList);
 
-            log.info("recommend list response: {}", recommendList);
             coreSseService.publishPaymentUpdated(
                     payment.getPaymentId(),
                     CoreSseEventType.RECOMMENDATION_SUCCEEDED,
                     recommendList);
+
         } catch (FeignException e) {
             log.error("recommend feign error. paymentId={}, userId={}, status={}, body={}",
                     payment.getPaymentId(), userId, e.status(), e.contentUTF8());
@@ -677,6 +688,25 @@ public class CoreService {
             log.error("recommend request unexpected error. paymentId={}, userId={}",
                     payment.getPaymentId(), userId, e);
             pushRecommendFailedEvent(payment.getPaymentId(), 500, "추천 처리 중 오류");
+        }
+    }
+
+    private void cacheRecommendation(Long paymentId, RecommendResponse recommendList) {
+        if (paymentId == null || recommendList == null || recommendList.getResults() == null) {
+            return;
+        }
+
+        String cacheKey = RECOMMENDATION_CACHE_KEY_PREFIX + paymentId;
+        try {
+            stringRedisTemplate.opsForValue().set(
+                    cacheKey,
+                    objectMapper.writeValueAsString(recommendList),
+                    RECOMMENDATION_CACHE_TTL);
+            log.info("recommendation cache saved. key={}, ttlSeconds={}",
+                    cacheKey,
+                    RECOMMENDATION_CACHE_TTL.toSeconds());
+        } catch (JsonProcessingException | RuntimeException e) {
+            log.warn("recommendation cache save failed. paymentId={}", paymentId, e);
         }
     }
 

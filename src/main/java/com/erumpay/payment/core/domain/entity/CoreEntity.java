@@ -72,6 +72,9 @@ public class CoreEntity {
 
     // 결제 정보
     @Enumerated(EnumType.STRING)
+    private StrategyType strategy_type;
+
+    @Enumerated(EnumType.STRING)
     private FailCode fail_code;
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
@@ -125,6 +128,14 @@ public class CoreEntity {
             throw new IllegalArgumentException("paymentIntent and updatedAt must not be null");
         }
         this.payment_intent = paymentIntent;
+        this.updatedAt = updatedAt;
+    }
+
+    public void updateStrategyType(String strategyType, LocalDateTime updatedAt) {
+        if (strategyType == null || strategyType.isBlank() || updatedAt == null) {
+            throw new IllegalArgumentException("strategyType and updatedAt must not be null");
+        }
+        this.strategy_type = StrategyType.valueOf(strategyType.trim().toUpperCase(Locale.ROOT));
         this.updatedAt = updatedAt;
     }
 
@@ -288,6 +299,13 @@ public class CoreEntity {
         DUTCH_HOST_AUTH_ONLY_PAY,
         DUTCH_HOST_PAY,
         DUTCH_MEMBER_PAY
+    }
+
+    public enum StrategyType {
+        BENEFIT_SINGLE,
+        BENEFIT_SPLIT,
+        PERF_SINGLE,
+        PERF_SPLIT
     }
 
     public enum FailCode {

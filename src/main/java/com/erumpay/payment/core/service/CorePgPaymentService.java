@@ -62,6 +62,9 @@ public class CorePgPaymentService {
         }
 
         boolean useAuthOnly = shouldUseAuthOnly(payment);
+
+        corePgPaymentPersistenceService.updateStrategyType(payment.getPaymentId(), request.getStrategyType());
+
         publishPendingEvent(payment.getPaymentId());
 
         // [be] 다윤 260527 단일 카드 결제 요청만 강제
@@ -168,6 +171,7 @@ public class CorePgPaymentService {
         }
 
         corePgPaymentPersistenceService.markPaidAndSaveEvent(payment.getPaymentId(), pgResponse);
+
         try {
             PaidCardRequest paidCard = buildPaidCardRequest(payment, pgResponse, card, billingKey);
             corePgPaymentPersistenceService.savePaidCardDetail(paidCard);
