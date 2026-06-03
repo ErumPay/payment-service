@@ -50,6 +50,7 @@ public class CorePgPaymentService {
     private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String PG_STATUS_APPROVED = "APPROVED";
     private static final String PG_STATUS_REJECTED = "REJECTED";
+    private static final String PG_STATUS_FAILED = "FAILED";
     private static final String PG_STATUS_VOIDED = "VOIDED";
     private static final String HOST_AUTH_STATUS_AUTHORIZED = "AUTHORIZED";
     private static final String HOST_AUTH_STATUS_FAILED = "FAILED";
@@ -138,9 +139,7 @@ public class CorePgPaymentService {
                 continue;
             }
 
-            ErrorCode errorCode = PG_STATUS_REJECTED.equalsIgnoreCase(pgStatus)
-                    ? ErrorCode.BAD_REQUEST
-                    : ErrorCode.INTERNAL_SERVER_ERROR;
+            ErrorCode errorCode = resolvePgFailureErrorCode(pgStatus);
             failPaymentAfterPgFailure(
                     payment,
                     pgResponse,
@@ -150,6 +149,16 @@ public class CorePgPaymentService {
         }
 
         return approvedPayments;
+    }
+
+    private ErrorCode resolvePgFailureErrorCode(String pgStatus) {
+        if (PG_STATUS_REJECTED.equalsIgnoreCase(pgStatus)) {
+            return ErrorCode.PG_PAYMENT_REJECTED;
+        }
+        if (PG_STATUS_FAILED.equalsIgnoreCase(pgStatus)) {
+            return ErrorCode.PG_PAYMENT_FAILED;
+        }
+        return ErrorCode.PG_PAYMENT_STATUS_INVALID;
     }
 
     private String resolvePgIdempotencyKey(
@@ -312,9 +321,9 @@ public class CorePgPaymentService {
         } catch (FeignException e) {
             log.error("pg feign error. status={}, body={}", e.status(), e.contentUTF8());
             if (e.status() >= 400 && e.status() < 500) {
-                throw new CustomException(ErrorCode.BAD_REQUEST);
+                throw new CustomException(ErrorCode.PG_PAYMENT_REJECTED);
             }
-            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PG_PAYMENT_FAILED);
         }
     }
 
