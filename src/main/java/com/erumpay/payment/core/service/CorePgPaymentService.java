@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import com.erumpay.payment.core.client.card.CardClient;
@@ -13,6 +14,7 @@ import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
 import com.erumpay.payment.core.client.pg.dto.PgPayCancelRequest;
+import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
 import com.erumpay.payment.core.dao.EventRepository;
 import com.erumpay.payment.core.domain.dto.CoreSseEventType;
 import com.erumpay.payment.core.domain.dto.PaidCardRequest;
@@ -27,6 +29,8 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequ
 import com.erumpay.payment.dutch.domain.dto.DutchPaySessionDetailResponse;
 import com.erumpay.payment.dutch.service.DutchPayService;
 import com.erumpay.payment.remote.service.RemotePayService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import feign.FeignException;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +49,7 @@ public class CorePgPaymentService {
     private static final String HOST_AUTH_STATUS_AUTHORIZED = "AUTHORIZED";
     private static final String HOST_AUTH_STATUS_FAILED = "FAILED";
     private static final String PARTICIPANT_PAYMENT_STATUS_PAID = "PAID";
+    private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
 
     private final PgClient pgClient;
     private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
@@ -52,6 +57,8 @@ public class CorePgPaymentService {
     private final RemotePayService remotePayService;
     private final CardClient cardClient;
     private final EventRepository eventRepository;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final ObjectMapper objectMapper;
 
     // [be] 다윤 260601 20:00 | pg 에게 결제 요청 진입점
     public void requestPgPayments(CoreEntity payment, PinAndPayRequest request) {
@@ -63,6 +70,7 @@ public class CorePgPaymentService {
 
         boolean useAuthOnly = shouldUseAuthOnly(payment);
 
+        RecommendResponse.Result selectedRecommendation = validateRecommendationSelection(payment.getPaymentId(), request);
         corePgPaymentPersistenceService.updateStrategyType(payment.getPaymentId(), request.getStrategyType());
 
         publishPendingEvent(payment.getPaymentId());
@@ -72,8 +80,79 @@ public class CorePgPaymentService {
             CardBillingKeyResponse billingKey = fetchBillingKeyOrThrow(payment, card);
             PgAuthPayResponse pgResponse = requestPgPayment(payment, card, billingKey, savedIdempotencyKey,
                     useAuthOnly);
-            handlePgResponse(payment, useAuthOnly, pgResponse, card, billingKey);
+            handlePgResponse(payment, useAuthOnly, pgResponse, card, billingKey, selectedRecommendation);
         }
+    }
+
+    // [be] 다윤 260603 21:00 | redis 카드 조합과 요청 카드 조합 일치 여부 검증
+    private RecommendResponse.Result validateRecommendationSelection(Long paymentId, PinAndPayRequest request) {
+        RecommendResponse recommendResponse = loadCachedRecommendation(paymentId);
+        RecommendResponse.Result selectedResult = findSelectedRecommendation(recommendResponse,
+                request.getStrategyType());
+
+        if (selectedResult == null || selectedResult.getCards() == null
+                || selectedResult.getCards().size() != request.getCards().size()) {
+            throw new CustomException(ErrorCode.RECOMMENDATION_SELECTION_INVALID);
+        }
+
+        for (PinAndPayRequest.CardPortion requestedCard : request.getCards()) {
+            if (findMatchingRecommendedCard(selectedResult.getCards(), requestedCard) == null) {
+                throw new CustomException(ErrorCode.RECOMMENDATION_SELECTION_INVALID);
+            }
+        }
+
+        log.info("recommendation selection validated. paymentId={}, strategyType={}",
+                paymentId,
+                request.getStrategyType());
+        return selectedResult;
+    }
+
+    // [be] 다윤 260603 21:00 | redis에 캐시된 추천 응답 조회
+    private RecommendResponse loadCachedRecommendation(Long paymentId) {
+        String cacheKey = RECOMMENDATION_CACHE_KEY_PREFIX + paymentId;
+        try {
+            String cachedRecommendation = stringRedisTemplate.opsForValue().get(cacheKey);
+            if (cachedRecommendation == null || cachedRecommendation.isBlank()) {
+                log.warn("recommendation cache missing. paymentId={}, key={}", paymentId, cacheKey);
+                throw new CustomException(ErrorCode.RECOMMENDATION_SELECTION_INVALID);
+            }
+
+            return objectMapper.readValue(cachedRecommendation, RecommendResponse.class);
+        } catch (CustomException e) {
+            throw e;
+        } catch (JsonProcessingException | RuntimeException e) {
+            log.warn("recommendation cache read failed. paymentId={}, key={}", paymentId, cacheKey, e);
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e);
+        }
+    }
+
+    // [be] 다윤 260603 21:00 | 요청 strategyType에 해당하는 추천 조합 조회
+    private RecommendResponse.Result findSelectedRecommendation(RecommendResponse recommendResponse,
+            String strategyType) {
+        if (recommendResponse == null || recommendResponse.getResults() == null || strategyType == null) {
+            return null;
+        }
+
+        return recommendResponse.getResults().stream()
+                .filter(result -> result != null && strategyType.equals(result.getStrategyType()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    // [be] 다윤 260603 21:00 | 선택된 결제 카드 조합의 카드와 금액 일치 여부 확인
+    private RecommendResponse.Card findMatchingRecommendedCard(
+            List<RecommendResponse.Card> recommendedCards,
+            PinAndPayRequest.CardPortion requestedCard) {
+        if (requestedCard == null) {
+            return null;
+        }
+
+        return recommendedCards.stream()
+                .filter(recommendedCard -> recommendedCard != null
+                        && requestedCard.getCardId().equals(recommendedCard.getCardId())
+                        && requestedCard.getAmount().equals(recommendedCard.getAmount()))
+                .findFirst()
+                .orElse(null);
     }
 
     // [be] 다윤 260601 20:00 | pg 에게 AUTH 또는 AUTH-ONLY 요청 분기
@@ -133,7 +212,8 @@ public class CorePgPaymentService {
             boolean useAuthOnly,
             PgAuthPayResponse pgResponse,
             PinAndPayRequest.CardPortion card,
-            CardBillingKeyResponse billingKey) {
+            CardBillingKeyResponse billingKey,
+            RecommendResponse.Result selectedRecommendation) {
         log.info("pgClientResponse : {}", pgResponse);
 
         if (pgResponse == null || pgResponse.getStatus() == null) {
@@ -144,7 +224,7 @@ public class CorePgPaymentService {
 
         String pgStatus = pgResponse.getStatus();
         if (PG_STATUS_APPROVED.equalsIgnoreCase(pgStatus)) {
-            markPaymentSucceeded(payment, useAuthOnly, pgResponse, card, billingKey);
+            markPaymentSucceeded(payment, useAuthOnly, pgResponse, card, billingKey, selectedRecommendation);
             publishPaidEvent(payment.getPaymentId());
 
             return;
@@ -163,7 +243,8 @@ public class CorePgPaymentService {
             boolean useAuthOnly,
             PgAuthPayResponse pgResponse,
             PinAndPayRequest.CardPortion card,
-            CardBillingKeyResponse billingKey) {
+            CardBillingKeyResponse billingKey,
+            RecommendResponse.Result selectedRecommendation) {
         if (useAuthOnly) {
             corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
             notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
@@ -173,7 +254,8 @@ public class CorePgPaymentService {
         corePgPaymentPersistenceService.markPaidAndSaveEvent(payment.getPaymentId(), pgResponse);
 
         try {
-            PaidCardRequest paidCard = buildPaidCardRequest(payment, pgResponse, card, billingKey);
+            PaidCardRequest paidCard = buildPaidCardRequest(payment, pgResponse, card, billingKey,
+                    selectedRecommendation);
             corePgPaymentPersistenceService.savePaidCardDetail(paidCard);
         } catch (RuntimeException e) {
             log.error(
@@ -283,7 +365,8 @@ public class CorePgPaymentService {
             CoreEntity payment,
             PgAuthPayResponse pgResponse,
             PinAndPayRequest.CardPortion card,
-            CardBillingKeyResponse billingKey) {
+            CardBillingKeyResponse billingKey,
+            RecommendResponse.Result selectedRecommendation) {
         if (payment == null
                 || payment.getPaymentId() == null
                 || pgResponse == null
@@ -318,6 +401,12 @@ public class CorePgPaymentService {
         String cardName = (billingKey == null || billingKey.getCardName() == null || billingKey.getCardName().isBlank())
                 ? "UNKNOWN_CARD"
                 : billingKey.getCardName();
+        RecommendResponse.Card recommendedCard = selectedRecommendation == null ? null
+                : findMatchingRecommendedCard(selectedRecommendation.getCards(), card);
+        Long discountAmount = recommendedCard == null || recommendedCard.getDiscountAmount() == null
+                ? 0L
+                : recommendedCard.getDiscountAmount();
+        String benefitDesc = selectedRecommendation == null ? null : selectedRecommendation.getReason();
 
         return PaidCardRequest.builder()
                 .paymentId(payment.getPaymentId())
@@ -327,8 +416,8 @@ public class CorePgPaymentService {
                 .maskedNumber(maskedNumber)
                 .cardName(cardName)
                 .paidAmount(paidAmount)
-                .discountAmount(0L)
-                .benefitDesc(null)
+                .discountAmount(discountAmount)
+                .benefitDesc(benefitDesc)
                 .paidAt(paidAt)
                 .build();
     }
