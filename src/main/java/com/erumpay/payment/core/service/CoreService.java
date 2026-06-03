@@ -137,8 +137,7 @@ public class CoreService {
                 request,
                 CoreEntity.DutchRole.HOST,
                 CoreEntity.PaymentIntent.DUTCH_HOST_PAY,
-                () -> {
-                },
+                () -> validateDutchHostFinalPayment(userId, request),
                 payment -> {
                 });
     }
@@ -399,7 +398,6 @@ public class CoreService {
         dutchPayService.validateParticipantPayment(
                 request.getSessionId(),
                 DutchPayParticipantPaymentValidateRequest.builder()
-                        .participant_id(request.getParticipantId())
                         .user_id(userId)
                         .amount(request.getAmount())
                         .idempotency_key(normalizedIdempotencyKey)
@@ -409,9 +407,15 @@ public class CoreService {
     private void registerDutchParticipantPayment(Long userId, DutchMemberPrepareRequest request, CoreEntity payment) {
         dutchPayService.registerParticipantPayment(
                 request.getSessionId(),
-                request.getParticipantId(),
                 userId,
                 payment);
+    }
+
+    private void validateDutchHostFinalPayment(Long userId, DutchMemberPrepareRequest request) {
+        dutchPayService.validateHostFinalPayment(
+                request.getSessionId(),
+                userId,
+                request.getAmount());
     }
 
     private ResponseEntity<PrepareResponse> finalizePrepare(CoreEntity payment, Long userId) {
