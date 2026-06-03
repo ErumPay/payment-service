@@ -513,6 +513,8 @@ public class CorePgPaymentService {
                     payment.getUserId(),
                     e);
         }
+    }
+
     private boolean shouldNotifyHostFinalPaymentResult(CoreEntity payment) {
         if (payment.getPayment_type() != CoreEntity.PaymentType.DUTCH) {
             return false;

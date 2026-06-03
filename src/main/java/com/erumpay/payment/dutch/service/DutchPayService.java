@@ -149,6 +149,38 @@ public class DutchPayService {
                 participant.getStatus().name());
     }
 
+    // [be] 영은 260603 | Core가 대표자 최종 결제 주문을 만들기 전에 세션/대표자/최종 부담금을 검증한다.
+    @Transactional(readOnly = true)
+    public void validateHostFinalPayment(
+            Long sessionId,
+            Long userId,
+            Long amount) {
+        if (sessionId == null || userId == null || amount == null || amount <= 0) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
+        }
+
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        if (!userId.equals(session.getHost_user_id())) {
+            throw new CustomException(ErrorCode.DUTCH_HOST_ONLY_ACTION);
+        }
+        if (session.getStatus() != DutchPayStatus.IN_PROGRESS
+                && session.getStatus() != DutchPayStatus.TIMEOUT_HANDLED) {
+            throw sessionStateException(session);
+        }
+
+        DutchPayParticipantEntity host = dutchPayParticipantRepository
+                .findBySessionIdAndUserId(sessionId, userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
+        if (host.getStatus() != ParticipantStatus.PENDING
+                || host.getPayment() != null
+                || host.getAmount() == null) {
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
+        }
+        if (!host.getAmount().equals(amount)) {
+            throw new CustomException(ErrorCode.DUTCH_AMOUNT_MISMATCH);
+        }
+    }
+
     // [be] 영은 260526 1620 | core가 참여자 결제 주문을 만들면 더치 참여자 row에 payment_id를 연결한다
     @Transactional
     public void registerParticipantPayment(
