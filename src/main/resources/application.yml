@@ -74,4 +74,4 @@ card:
 
 merchant:
   base-url: ${MERCHANT_BASE_URL:http://localhost:8094}
-  api-key-dev-fallback-enabled: ${MERCHANT_API_KEY_DEV_FALLBACK_ENABLED:true}
+  api-key-dev-fallback-enabled: ${MERCHANT_API_KEY_DEV_FALLBACK_ENABLED:false}

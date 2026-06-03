@@ -42,6 +42,12 @@ public class MerchantApiKeyResolver {
         } catch (CustomException e) {
             throw e;
         } catch (FeignException e) {
+            if (e.status() >= 400 && e.status() < 500) {
+                log.warn("Merchant API key validation rejected by merchant-service. status={}, body={}",
+                        e.status(),
+                        e.contentUTF8());
+                throw new CustomException(ErrorCode.MERCHANT_API_KEY_INVALID, e);
+            }
             return resolveWithDevFallbackOrThrow(apiKey, e);
         } catch (RuntimeException e) {
             return resolveWithDevFallbackOrThrow(apiKey, e);
