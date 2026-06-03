@@ -41,8 +41,8 @@ public class MerchantPaymentService {
     private final CoreValidationService coreValidationService;
     private final PgClient pgClient;
 
-    @Value("${spring.qr.baseUrl}")
-    private String checkoutBaseUrl;
+    @Value("${checkout.redirect-base-url}")
+    private String checkoutRedirectBaseUrl;
 
     @Value("${pg.authorization}")
     private String pgAuthorization;
@@ -162,13 +162,13 @@ public class MerchantPaymentService {
         String token = UUID.randomUUID().toString().replace("-", "");
         qrRepository.save(QrEntity.toEntity(savedPayment, token, now, now.plusMinutes(10)));
 
-        return MerchantPaymentResponse.from(savedPayment, checkoutBaseUrl + token, token);
+        return MerchantPaymentResponse.from(savedPayment, checkoutRedirectBaseUrl + token, token);
     }
 
     // [be] 나영은 260529 1638 | 재조회/멱등 응답에서도 결제창 진입 정보가 유지되도록 QR 토큰을 다시 조립한다.
     private MerchantPaymentResponse toResponse(CoreEntity payment) {
         return qrRepository.findByPaymentId(payment.getPaymentId())
-                .map(qr -> MerchantPaymentResponse.from(payment, checkoutBaseUrl + qr.getToken_hash(), qr.getToken_hash()))
+                .map(qr -> MerchantPaymentResponse.from(payment, checkoutRedirectBaseUrl + qr.getToken_hash(), qr.getToken_hash()))
                 .orElseGet(() -> MerchantPaymentResponse.from(payment, null, null));
     }
 

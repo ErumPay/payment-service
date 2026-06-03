@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
@@ -38,7 +39,6 @@ import lombok.extern.slf4j.Slf4j;
 public class CorePgPaymentService {
 
     private final CoreSseService coreSseService;
-    private static final String AUTHORIZATION = "Bearer server-test-token";
     private static final String PG_STATUS_APPROVED = "APPROVED";
     private static final String PG_STATUS_REJECTED = "REJECTED";
     private static final String PG_STATUS_VOIDED = "VOIDED";
@@ -52,6 +52,9 @@ public class CorePgPaymentService {
     private final RemotePayService remotePayService;
     private final CardClient cardClient;
     private final EventRepository eventRepository;
+
+    @Value("${pg.authorization}")
+    private String pgAuthorization;
 
     // [be] 다윤 260601 20:00 | pg 에게 결제 요청 진입점
     public void requestPgPayments(CoreEntity payment, PinAndPayRequest request) {
@@ -85,11 +88,11 @@ public class CorePgPaymentService {
         try {
             PgAuthPayResponse pgResponse = useAuthOnly
                     ? pgClient.pgPaymentAuthOnlyRequest(
-                            AUTHORIZATION,
+                            pgAuthorization,
                             savedIdempotencyKey,
                             pgAuthRequest)
                     : pgClient.pgPaymentRequest(
-                            AUTHORIZATION,
+                            pgAuthorization,
                             savedIdempotencyKey,
                             pgAuthRequest);
             log.info(
@@ -463,7 +466,7 @@ public class CorePgPaymentService {
         String voidIdempotencyKey = finalPayment.getIdempotencyKey() + "-void-" + hostAuthPaymentId;
 
         PgAuthPayResponse pgResponse = pgClient.pgPaymentAuthCancelRequest(
-                AUTHORIZATION,
+                pgAuthorization,
                 voidIdempotencyKey,
                 hostAuthPgTxnId,
                 authCancelRequest);
