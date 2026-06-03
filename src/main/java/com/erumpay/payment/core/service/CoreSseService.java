@@ -185,7 +185,8 @@ public class CoreSseService {
     }
 
     private boolean shouldCompleteSubscriptions(CoreSseEventResponse event) {
-        return event != null && event.getEventType() == CoreSseEventType.PAYMENT_PAID;
+        return event != null && (event.getEventType() == CoreSseEventType.PAYMENT_PAID
+                || event.getEventType() == CoreSseEventType.PAYMENT_AUTHORIZED);
     }
 
     private void removeEmitter(Long paymentId, SseEmitter emitter) {
