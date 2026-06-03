@@ -180,11 +180,11 @@ public class RemotePayService {
     // [be] 영은 260527 1450 | RemotePay는 카드 승인 자체를 수행하지 않고, 결제 결과에 따른 요청 상태만 관리한다.
     @Transactional
     public void completeByPayment(CoreEntity payment) {
-        if (payment == null || payment.getRemote_request_id() == null) {
+        if (payment == null) {
             return;
         }
 
-        RemotePayRequestEntity request = getRequestForUpdate(payment.getRemote_request_id());
+        RemotePayRequestEntity request = getRequestForPayment(payment);
         try {
             request.complete(payment, LocalDateTime.now());
         } catch (IllegalArgumentException | IllegalStateException e) {
@@ -201,7 +201,7 @@ public class RemotePayService {
             return;
         }
 
-        RemotePayRequestEntity request = getRequestForUpdate(payment.getRemote_request_id());
+        RemotePayRequestEntity request = getRequestForPayment(payment);
         try {
             request.requirePayable(payment, LocalDateTime.now());
         } catch (IllegalArgumentException | IllegalStateException e) {
@@ -348,6 +348,19 @@ public class RemotePayService {
         }
 
         return remotePayRequestRepository.findByIdForUpdate(requestId)
+                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+    }
+
+    private RemotePayRequestEntity getRequestForPayment(CoreEntity payment) {
+        if (payment == null || payment.getPaymentId() == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        if (payment.getRemote_request_id() != null) {
+            return getRequestForUpdate(payment.getRemote_request_id());
+        }
+
+        return remotePayRequestRepository.findByPaymentIdForUpdate(payment.getPaymentId())
                 .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
     }
 

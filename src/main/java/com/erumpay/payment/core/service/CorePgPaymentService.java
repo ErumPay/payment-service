@@ -26,6 +26,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayHostFinalPaymentResultReques
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPaySessionDetailResponse;
 import com.erumpay.payment.dutch.service.DutchPayService;
+import com.erumpay.payment.remote.service.RemotePayService;
 
 import feign.FeignException;
 import lombok.RequiredArgsConstructor;
@@ -48,6 +49,7 @@ public class CorePgPaymentService {
     private final PgClient pgClient;
     private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
     private final DutchPayService dutchPayService;
+    private final RemotePayService remotePayService;
     private final CardClient cardClient;
     private final EventRepository eventRepository;
 
@@ -178,6 +180,7 @@ public class CorePgPaymentService {
                     e);
         }
         notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
+        notifyRemotePaymentResultIfNeeded(payment);
         notifyHostFinalPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
     }
 
@@ -497,6 +500,19 @@ public class CorePgPaymentService {
         return payment.getPayment_intent() == CoreEntity.PaymentIntent.DUTCH_MEMBER_PAY;
     }
 
+    private void notifyRemotePaymentResultIfNeeded(CoreEntity payment) {
+        if (payment.getPayment_type() != CoreEntity.PaymentType.REMOTE) {
+            return;
+        }
+
+        try {
+            remotePayService.completeByPayment(payment);
+        } catch (RuntimeException e) {
+            log.error("remote payment result notify failed. paymentId={}, userId={}",
+                    payment.getPaymentId(),
+                    payment.getUserId(),
+                    e);
+        }
     private boolean shouldNotifyHostFinalPaymentResult(CoreEntity payment) {
         if (payment.getPayment_type() != CoreEntity.PaymentType.DUTCH) {
             return false;
