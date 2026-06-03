@@ -153,7 +153,7 @@ public class CoreService {
         validatePayRequestPreconditions(payment, userId, normalizedIdempotencyKey, request);
 
         // [be] 다윤 260526 auth-service pin 인증 요청
-        // AuthResponse authResponse = verifyPin(userId, request.getPin());
+        verifyPin(userId, request.getPin());
 
         // [be] 다윤 260526 00:00 | pg-payment-service 실결제 요청
         corePgPaymentService.requestPgPayments(payment, request);
@@ -177,11 +177,7 @@ public class CoreService {
             log.info("auth feign response : {}", res);
         } catch (FeignException e) {
             log.error("auth feign error. status={}, body={}", e.status(), e.contentUTF8());
-
-            if (e.status() == 400 || e.status() == 401 || e.status() == 404 || e.status() == 423) {
-                throw new CustomException(ErrorCode.PIN_INVALID);
-            }
-            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+            throw new CustomException(mapAuthPinError(e.status()), e);
         }
 
         if (res == null || !res.isVerified()) {
@@ -189,6 +185,16 @@ public class CoreService {
         }
 
         return res;
+    }
+
+    private ErrorCode mapAuthPinError(int status) {
+        return switch (status) {
+            case 400 -> ErrorCode.BAD_REQUEST;
+            case 401 -> ErrorCode.PIN_INVALID;
+            case 404 -> ErrorCode.PIN_NOT_SET;
+            case 423 -> ErrorCode.PIN_LOCKED;
+            default -> ErrorCode.INTERNAL_AUTH_SERVER_ERROR;
+        };
     }
 
     // [be] 다윤 260527 일반 결제 취소

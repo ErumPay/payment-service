@@ -39,3 +39,4 @@ out/
 .env
 .docker-compose.yml
 .env.docker
+docs/
