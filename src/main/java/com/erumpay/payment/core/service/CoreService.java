@@ -62,6 +62,7 @@ import lombok.extern.slf4j.Slf4j;
 @Transactional
 public class CoreService {
     private static final String PG_STATUS_REJECTED = "REJECTED";
+    private static final String PG_STATUS_CANCELED = "CANCELED";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
     private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
     private static final Duration RECOMMENDATION_CACHE_TTL = Duration.ofMinutes(30);
@@ -529,9 +530,9 @@ public class CoreService {
         } catch (FeignException e) {
             log.error("pg cancel feign error. status={}, body={}", e.status(), e.contentUTF8());
             if (e.status() >= 400 && e.status() < 500) {
-                throw new CustomException(ErrorCode.BAD_REQUEST);
+                throw new CustomException(ErrorCode.CANCELED_PG_REJECTED, e);
             }
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR, e);
         }
     }
 
@@ -540,8 +541,12 @@ public class CoreService {
             throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
         }
 
-        if (PG_STATUS_REJECTED.equals(pgResponse.getStatus())) {
+        if (PG_STATUS_REJECTED.equalsIgnoreCase(pgResponse.getStatus())) {
             throw new CustomException(ErrorCode.CANCELED_PG_REJECTED);
+        }
+
+        if (!PG_STATUS_CANCELED.equalsIgnoreCase(pgResponse.getStatus())) {
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
         }
     }
 

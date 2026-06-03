@@ -33,6 +33,7 @@ import lombok.RequiredArgsConstructor;
 public class MerchantPaymentService {
     private static final String CANCEL_REASON = "MERCHANT_REQUEST";
     private static final String PG_STATUS_REJECTED = "REJECTED";
+    private static final String PG_STATUS_CANCELED = "CANCELED";
 
     private final CoreRepository coreRepository;
     private final CardDetailRepository cardDetailRepository;
@@ -115,7 +116,7 @@ public class MerchantPaymentService {
                         cancelRequest);
             } catch (FeignException e) {
                 if (e.status() >= 400 && e.status() < 500) {
-                    throw new CustomException(ErrorCode.BAD_REQUEST, e);
+                    throw new CustomException(ErrorCode.CANCELED_PG_REJECTED, e);
                 }
                 throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR, e);
             }
@@ -124,8 +125,12 @@ public class MerchantPaymentService {
                 throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
             }
 
-            if (PG_STATUS_REJECTED.equals(pgResponse.getStatus())) {
+            if (PG_STATUS_REJECTED.equalsIgnoreCase(pgResponse.getStatus())) {
                 throw new CustomException(ErrorCode.CANCELED_PG_REJECTED);
+            }
+
+            if (!PG_STATUS_CANCELED.equalsIgnoreCase(pgResponse.getStatus())) {
+                throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
             }
         }
 
