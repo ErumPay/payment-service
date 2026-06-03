@@ -25,6 +25,7 @@ public enum ErrorCode {
     CARD_BILLING_KEY_FORBIDDEN(HttpStatus.FORBIDDEN, "PAY-CARD-101", "CARD_BILLING_KEY_FORBIDDEN", "카드 빌링키 접근 권한이 없습니다."),
     MERCHANT_API_KEY_MISSING(HttpStatus.UNAUTHORIZED, "PAY-MER-101", "MERCHANT_API_KEY_MISSING", "API key가 필요합니다."),
     MERCHANT_API_KEY_INVALID(HttpStatus.UNAUTHORIZED, "PAY-MER-102", "MERCHANT_API_KEY_INVALID", "API key가 올바르지 않습니다."),
+    MERCHANT_AUTH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "PAY-MER-401", "MERCHANT_AUTH_UNAVAILABLE", "가맹점 인증 서비스를 일시적으로 사용할 수 없습니다."),
 
     // Not found
     QR_NOT_FOUND(HttpStatus.NOT_FOUND, "PAY-QR-201", "QR_NOT_FOUND", "QR 토큰 정보를 찾을 수 없습니다."),

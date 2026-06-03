@@ -1,42 +1,103 @@
 package com.erumpay.payment.merchant.service;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
+import com.erumpay.payment.merchant.client.MerchantClient;
+import com.erumpay.payment.merchant.client.dto.ApiKeyValidationRequest;
+import com.erumpay.payment.merchant.client.dto.ApiKeyValidationResponse;
 
+import feign.FeignException;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class MerchantApiKeyResolver {
 
-    // [be] 나영은 260529 1638 | 임시 SDK 테스트용 resolver. 추후 merchant-service API Key 검증 API 연동으로 교체한다.
+    private static final String BEARER_PREFIX = "Bearer ";
+
+    private final MerchantClient merchantClient;
+
+    @Value("${merchant.api-key-dev-fallback-enabled:false}")
+    private boolean devFallbackEnabled;
+
     public Long resolveMerchantId(String authorization) {
-        if (authorization == null || !authorization.startsWith("Bearer ")) {
-            log.warn("Merchant API authorization header is missing or invalid.");
-            throw new CustomException(ErrorCode.FORBIDDEN);
+        String apiKey = extractApiKey(authorization);
+
+        try {
+            ApiKeyValidationResponse response = merchantClient.validateApiKey(
+                    new ApiKeyValidationRequest(apiKey));
+            if (response == null || !response.isValid() || response.getMerchantId() == null) {
+                log.warn("Merchant API key validation failed. valid={}, merchantId={}",
+                        response == null ? null : response.isValid(),
+                        response == null ? null : response.getMerchantId());
+                throw new CustomException(ErrorCode.MERCHANT_API_KEY_INVALID);
+            }
+
+            return response.getMerchantId();
+        } catch (CustomException e) {
+            throw e;
+        } catch (FeignException e) {
+            return resolveWithDevFallbackOrThrow(apiKey, e);
+        } catch (RuntimeException e) {
+            return resolveWithDevFallbackOrThrow(apiKey, e);
+        }
+    }
+
+    private String extractApiKey(String authorization) {
+        if (authorization == null || authorization.isBlank()) {
+            log.warn("Merchant API authorization header is missing.");
+            throw new CustomException(ErrorCode.MERCHANT_API_KEY_MISSING);
+        }
+        if (!authorization.startsWith(BEARER_PREFIX)) {
+            log.warn("Merchant API authorization header is not a Bearer token.");
+            throw new CustomException(ErrorCode.MERCHANT_API_KEY_INVALID);
         }
 
-        String token = authorization.substring("Bearer ".length()).trim();
+        String apiKey = authorization.substring(BEARER_PREFIX.length()).trim();
+        if (apiKey.isBlank()) {
+            throw new CustomException(ErrorCode.MERCHANT_API_KEY_MISSING);
+        }
+
+        return apiKey;
+    }
+
+    private Long resolveWithDevFallbackOrThrow(String apiKey, RuntimeException e) {
+        if (devFallbackEnabled) {
+            Long merchantId = tryResolveDevMerchantId(apiKey);
+            if (merchantId != null) {
+                log.warn("Merchant API key validation unavailable. Using local dev fallback. merchantId={}",
+                        merchantId,
+                        e);
+                return merchantId;
+            }
+        }
+
+        log.error("Merchant API key validation unavailable.", e);
+        throw new CustomException(ErrorCode.MERCHANT_AUTH_UNAVAILABLE, e);
+    }
+
+    private Long tryResolveDevMerchantId(String apiKey) {
         String idPart = null;
-        // [be] 나영은 260529 1638 | 로컬 테스트에서는 merchant_1_xxx 또는 test_1_xxx 형태에서 merchantId만 추출한다.
-        if (token.startsWith("merchant_")) {
-            idPart = token.substring("merchant_".length()).split("_", 2)[0];
-        } else if (token.startsWith("test_")) {
-            idPart = token.substring("test_".length()).split("_", 2)[0];
+        if (apiKey.startsWith("merchant_")) {
+            idPart = apiKey.substring("merchant_".length()).split("_", 2)[0];
+        } else if (apiKey.startsWith("test_")) {
+            idPart = apiKey.substring("test_".length()).split("_", 2)[0];
         }
 
         if (idPart == null || idPart.isBlank()) {
-            log.warn("Merchant API key format is invalid.");
-            throw new CustomException(ErrorCode.FORBIDDEN);
+            return null;
         }
 
         try {
             return Long.valueOf(idPart);
         } catch (NumberFormatException e) {
             log.warn("Merchant API key contains non-numeric merchant id. idPart={}", idPart);
-            throw new CustomException(ErrorCode.FORBIDDEN, e);
+            return null;
         }
     }
 }
