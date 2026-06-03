@@ -49,13 +49,15 @@ public class CorePgPaymentPersistenceService {
         eventRepository.save(savedEvent);
     }
 
-    // [be] 다윤 260601 20:00 | 결제 성공 원장 기록
+    // [be] 다윤 260601 20:00 | 결제 성공 내역 원장 기록
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void markPaidAndSaveEvent(Long paymentId, PgAuthPayResponse pgResponse) {
+    public void markPaidAndSaveEvent(Long paymentId, PgAuthPayResponse pgResponse, String strategyType) {
         CoreEntity payment = coreRepository.findById(paymentId)
                 .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
 
-        payment.paidStatusUpdatePayment(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        payment.updateStrategyType(strategyType, now);
+        payment.paidStatusUpdatePayment(now);
 
         EventEntity savedEvent = EventEntity.builder()
                 .payment_id(payment.getPaymentId())
@@ -68,6 +70,7 @@ public class CorePgPaymentPersistenceService {
         eventRepository.save(savedEvent);
     }
 
+    // [be] 다윤 260601 20:00 | 결제 성공 카드 원장 기록
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void savePaidCardDetail(PaidCardRequest paidCard) {
         if (paidCard == null || paidCard.getPaymentId() == null || paidCard.getPgTxnId() == null) {

@@ -17,6 +17,8 @@ public enum ErrorCode {
     PIN_NOT_SET(HttpStatus.NOT_FOUND, "PAY-AUTH-002", "PIN_NOT_SET", "설정된 결제 비밀번호가 없습니다."),
     PIN_LOCKED(HttpStatus.LOCKED, "PAY-AUTH-003", "PIN_LOCKED", "결제 비밀번호가 잠겨 있습니다."),
     AMOUNT_MISMATCH(HttpStatus.BAD_REQUEST, "PAY-CORE-002", "PAYMENT_AMOUNT_MISMATCH", "잘못된 금액 요청입니다."),
+    RECOMMENDATION_SELECTION_INVALID(HttpStatus.BAD_REQUEST, "PAY-CORE-004",
+            "PAYMENT_RECOMMENDATION_SELECTION_INVALID", "선택한 추천 결제 조합이 올바르지 않습니다."),
     CANCELED_INVALID(HttpStatus.BAD_REQUEST, "PAY-CORE-204", "PAYMENT_CANCEL_NOT_ALLOWED", "취소 불가능한 결제건입니다."),
     CANCELED_CARD_INVALID(HttpStatus.BAD_REQUEST, "PAY-CORE-205", "PAYMENT_CANCEL_CARD_NOT_FOUND", "취소 가능한 카드가 없습니다."),
     CANCELED_PG_REJECTED(HttpStatus.BAD_REQUEST, "PAY-PG-402", "PG_CANCEL_REJECTED", "취소가 거절되었습니다."),
