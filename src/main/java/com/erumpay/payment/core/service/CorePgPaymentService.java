@@ -1,6 +1,7 @@
 package com.erumpay.payment.core.service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -79,13 +80,134 @@ public class CorePgPaymentService {
         publishPendingEvent(payment.getPaymentId());
 
         Map<Long, CardBillingKeyResponse> billingKeys = fetchBillingKeysOrThrow(payment, request.getCards());
+        List<ApprovedCardPayment> approvedPayments = requestApprovedCardPayments(
+                payment,
+                request,
+                billingKeys,
+                savedIdempotencyKey,
+                useAuthOnly);
 
-        // [be] 다윤 260527 단일 카드 결제 요청만 강제
-        for (PinAndPayRequest.CardPortion card : request.getCards()) {
+        if (useAuthOnly) {
+            PgAuthPayResponse pgResponse = approvedPayments.get(0).pgResponse();
+            corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
+            notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
+            publishPaidEvent(payment.getPaymentId());
+            return;
+        }
+
+        markPaymentSucceeded(payment, approvedPayments, selectedRecommendation);
+        publishPaidEvent(payment.getPaymentId());
+    }
+
+    private List<ApprovedCardPayment> requestApprovedCardPayments(
+            CoreEntity payment,
+            PinAndPayRequest request,
+            Map<Long, CardBillingKeyResponse> billingKeys,
+            String savedIdempotencyKey,
+            boolean useAuthOnly) {
+        if (useAuthOnly && request.getCards().size() != 1) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        List<ApprovedCardPayment> approvedPayments = new ArrayList<>();
+
+        for (int i = 0; i < request.getCards().size(); i++) {
+            PinAndPayRequest.CardPortion card = request.getCards().get(i);
             CardBillingKeyResponse billingKey = findBillingKeyOrThrow(payment, card, billingKeys);
-            PgAuthPayResponse pgResponse = requestPgPayment(payment, card, billingKey, savedIdempotencyKey,
-                    useAuthOnly);
-            handlePgResponse(payment, useAuthOnly, pgResponse, card, billingKey, selectedRecommendation);
+            String pgIdempotencyKey = resolvePgIdempotencyKey(savedIdempotencyKey, card, i, useAuthOnly);
+            PgAuthPayResponse pgResponse;
+            try {
+                pgResponse = requestPgPayment(payment, card, billingKey, pgIdempotencyKey, useAuthOnly);
+            } catch (RuntimeException e) {
+                failPaymentAfterPgFailure(payment, null, approvedPayments, savedIdempotencyKey, e);
+                throw e;
+            }
+
+            if (pgResponse == null || pgResponse.getStatus() == null) {
+                failPaymentAfterPgFailure(
+                        payment,
+                        pgResponse,
+                        approvedPayments,
+                        savedIdempotencyKey,
+                        new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR));
+            }
+
+            String pgStatus = pgResponse.getStatus();
+            if (PG_STATUS_APPROVED.equalsIgnoreCase(pgStatus)) {
+                approvedPayments.add(new ApprovedCardPayment(card, billingKey, pgResponse));
+                continue;
+            }
+
+            ErrorCode errorCode = PG_STATUS_REJECTED.equalsIgnoreCase(pgStatus)
+                    ? ErrorCode.BAD_REQUEST
+                    : ErrorCode.INTERNAL_SERVER_ERROR;
+            failPaymentAfterPgFailure(
+                    payment,
+                    pgResponse,
+                    approvedPayments,
+                    savedIdempotencyKey,
+                    new CustomException(errorCode));
+        }
+
+        return approvedPayments;
+    }
+
+    private String resolvePgIdempotencyKey(
+            String savedIdempotencyKey,
+            PinAndPayRequest.CardPortion card,
+            int index,
+            boolean useAuthOnly) {
+        if (useAuthOnly) {
+            return savedIdempotencyKey;
+        }
+        return savedIdempotencyKey + "-card-" + (index + 1) + "-" + card.getCardId();
+    }
+
+    private void failPaymentAfterPgFailure(
+            CoreEntity payment,
+            PgAuthPayResponse pgResponse,
+            List<ApprovedCardPayment> approvedPayments,
+            String savedIdempotencyKey,
+            RuntimeException exception) {
+        compensateApprovedPayments(payment, approvedPayments, savedIdempotencyKey);
+        markPaymentFailed(payment, pgResponse);
+        publishFailedEvent(payment.getPaymentId());
+        throw exception;
+    }
+
+    private void compensateApprovedPayments(
+            CoreEntity payment,
+            List<ApprovedCardPayment> approvedPayments,
+            String savedIdempotencyKey) {
+        for (ApprovedCardPayment approvedPayment : approvedPayments) {
+            Long pgTxnId = approvedPayment.pgResponse().getPgTxnId();
+            if (pgTxnId == null) {
+                continue;
+            }
+
+            PgPayCancelRequest cancelRequest = PgPayCancelRequest.builder()
+                    .payPaymentId(payment.getPaymentId())
+                    .merchantId(payment.getMerchant_id())
+                    .cancelReason("MULTI_CARD_PAYMENT_FAILED")
+                    .build();
+            String compensationIdempotencyKey = savedIdempotencyKey + "-compensate-" + pgTxnId;
+
+            try {
+                PgAuthPayResponse cancelResponse = pgClient.pgPaymentCancelRequest(
+                        AUTHORIZATION,
+                        compensationIdempotencyKey,
+                        pgTxnId,
+                        cancelRequest);
+                log.info("pg compensation cancel requested. paymentId={}, pgTxnId={}, status={}",
+                        payment.getPaymentId(),
+                        pgTxnId,
+                        cancelResponse == null ? null : cancelResponse.getStatus());
+            } catch (RuntimeException e) {
+                log.error("pg compensation cancel failed. paymentId={}, pgTxnId={}",
+                        payment.getPaymentId(),
+                        pgTxnId,
+                        e);
+            }
         }
     }
 
@@ -189,7 +311,6 @@ public class CorePgPaymentService {
             return pgResponse;
         } catch (FeignException e) {
             log.error("pg feign error. status={}, body={}", e.status(), e.contentUTF8());
-            notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, null);
             if (e.status() >= 400 && e.status() < 500) {
                 throw new CustomException(ErrorCode.BAD_REQUEST);
             }
@@ -211,71 +332,40 @@ public class CorePgPaymentService {
                 .build();
     }
 
-    // [be] 다윤 260601 20:00 | pg 응답 분기 처리 후 SSE push
-    private void handlePgResponse(
-            CoreEntity payment,
-            boolean useAuthOnly,
-            PgAuthPayResponse pgResponse,
-            PinAndPayRequest.CardPortion card,
-            CardBillingKeyResponse billingKey,
-            RecommendResponse.Result selectedRecommendation) {
-        log.info("pgClientResponse : {}", pgResponse);
-
-        if (pgResponse == null || pgResponse.getStatus() == null) {
-            markPaymentFailed(payment, pgResponse);
-            publishFailedEvent(payment.getPaymentId());
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
-        }
-
-        String pgStatus = pgResponse.getStatus();
-        if (PG_STATUS_APPROVED.equalsIgnoreCase(pgStatus)) {
-            markPaymentSucceeded(payment, useAuthOnly, pgResponse, card, billingKey, selectedRecommendation);
-            publishPaidEvent(payment.getPaymentId());
-
-            return;
-        }
-
-        markPaymentFailed(payment, pgResponse);
-        if (PG_STATUS_REJECTED.equalsIgnoreCase(pgStatus)) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
-        }
-        throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
-    }
-
     // [be] 다윤 260601 20:00 | 결제 성공 시 원장기록, 가승인의 경우 더치에게 가승인 성공 전달, 결제카드 기록
     private void markPaymentSucceeded(
             CoreEntity payment,
-            boolean useAuthOnly,
-            PgAuthPayResponse pgResponse,
-            PinAndPayRequest.CardPortion card,
-            CardBillingKeyResponse billingKey,
+            List<ApprovedCardPayment> approvedPayments,
             RecommendResponse.Result selectedRecommendation) {
-        if (useAuthOnly) {
-            corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
-            notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
-            return;
+        if (approvedPayments.isEmpty()) {
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
 
+        PgAuthPayResponse firstPgResponse = approvedPayments.get(0).pgResponse();
         corePgPaymentPersistenceService.markPaidAndSaveEvent(
                 payment.getPaymentId(),
-                pgResponse,
+                firstPgResponse,
                 selectedRecommendation.getStrategyType());
 
         try {
-            PaidCardRequest paidCard = buildPaidCardRequest(payment, pgResponse, card, billingKey,
-                    selectedRecommendation);
-            corePgPaymentPersistenceService.savePaidCardDetail(paidCard);
+            for (ApprovedCardPayment approvedPayment : approvedPayments) {
+                PaidCardRequest paidCard = buildPaidCardRequest(
+                        payment,
+                        approvedPayment.pgResponse(),
+                        approvedPayment.card(),
+                        approvedPayment.billingKey(),
+                        selectedRecommendation);
+                corePgPaymentPersistenceService.savePaidCardDetail(paidCard);
+            }
         } catch (RuntimeException e) {
             log.error(
-                    "paid card detail save failed, but payment is already marked PAID. paymentId={}, pgTxnId={}, cardId={}",
+                    "paid card detail save failed, but payment is already marked PAID. paymentId={}",
                     payment.getPaymentId(),
-                    pgResponse == null ? null : pgResponse.getPgTxnId(),
-                    card == null ? null : card.getCardId(),
                     e);
         }
-        notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
+        notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, firstPgResponse);
         notifyRemotePaymentResultIfNeeded(payment);
-        notifyHostFinalPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, pgResponse);
+        notifyHostFinalPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, firstPgResponse);
     }
 
     // [be] 다윤 260601 20:00 | 결제 실패 시 원장기록, 가승인의 경우 더치에게 가승인 실패 전달
@@ -450,6 +540,12 @@ public class CorePgPaymentService {
                 .benefitDesc(benefitDesc)
                 .paidAt(paidAt)
                 .build();
+    }
+
+    private record ApprovedCardPayment(
+            PinAndPayRequest.CardPortion card,
+            CardBillingKeyResponse billingKey,
+            PgAuthPayResponse pgResponse) {
     }
 
     private boolean shouldUseAuthOnly(CoreEntity payment) {
