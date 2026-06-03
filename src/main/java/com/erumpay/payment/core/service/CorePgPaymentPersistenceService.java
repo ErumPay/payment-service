@@ -29,14 +29,6 @@ public class CorePgPaymentPersistenceService {
     private final CoreRepository coreRepository;
     private final EventRepository eventRepository;
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void updateStrategyType(Long paymentId, String strategyType) {
-        CoreEntity payment = coreRepository.findById(paymentId)
-                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
-
-        payment.updateStrategyType(strategyType, LocalDateTime.now());
-    }
-
     // [be] 다윤 260601 20:00 | 결제 실패 원장 기록
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markFailedAndSaveEvent(Long paymentId, PgAuthPayResponse pgResponse) {
@@ -59,11 +51,13 @@ public class CorePgPaymentPersistenceService {
 
     // [be] 다윤 260601 20:00 | 결제 성공 내역 원장 기록
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void markPaidAndSaveEvent(Long paymentId, PgAuthPayResponse pgResponse) {
+    public void markPaidAndSaveEvent(Long paymentId, PgAuthPayResponse pgResponse, String strategyType) {
         CoreEntity payment = coreRepository.findById(paymentId)
                 .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
 
-        payment.paidStatusUpdatePayment(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        payment.updateStrategyType(strategyType, now);
+        payment.paidStatusUpdatePayment(now);
 
         EventEntity savedEvent = EventEntity.builder()
                 .payment_id(payment.getPaymentId())

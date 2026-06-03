@@ -71,7 +71,6 @@ public class CorePgPaymentService {
         boolean useAuthOnly = shouldUseAuthOnly(payment);
 
         RecommendResponse.Result selectedRecommendation = validateRecommendationSelection(payment.getPaymentId(), request);
-        corePgPaymentPersistenceService.updateStrategyType(payment.getPaymentId(), request.getStrategyType());
 
         publishPendingEvent(payment.getPaymentId());
 
@@ -251,7 +250,10 @@ public class CorePgPaymentService {
             return;
         }
 
-        corePgPaymentPersistenceService.markPaidAndSaveEvent(payment.getPaymentId(), pgResponse);
+        corePgPaymentPersistenceService.markPaidAndSaveEvent(
+                payment.getPaymentId(),
+                pgResponse,
+                selectedRecommendation.getStrategyType());
 
         try {
             PaidCardRequest paidCard = buildPaidCardRequest(payment, pgResponse, card, billingKey,
