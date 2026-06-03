@@ -399,6 +399,7 @@ public class CoreService {
         dutchPayService.validateParticipantPayment(
                 request.getSessionId(),
                 DutchPayParticipantPaymentValidateRequest.builder()
+                        .participant_id(request.getParticipantId())
                         .user_id(userId)
                         .amount(request.getAmount())
                         .idempotency_key(normalizedIdempotencyKey)
@@ -408,6 +409,7 @@ public class CoreService {
     private void registerDutchParticipantPayment(Long userId, DutchMemberPrepareRequest request, CoreEntity payment) {
         dutchPayService.registerParticipantPayment(
                 request.getSessionId(),
+                request.getParticipantId(),
                 userId,
                 payment);
     }
