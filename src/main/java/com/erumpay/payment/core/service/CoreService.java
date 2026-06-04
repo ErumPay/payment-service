@@ -692,17 +692,6 @@ public class CoreService {
                 .cardId(cardDetail.getCard_id())
                 .approvedAmount(cardDetail.getPaid_amount())
                 .approvedAt(cardDetail.getPaid_at())
-                .appliedBenefit(toPaymentResultAppliedBenefit(cardDetail.getDiscount_amount()))
-                .build();
-    }
-
-    private PaymentResultRequest.AppliedBenefit toPaymentResultAppliedBenefit(Long benefitAmount) {
-        if (benefitAmount == null || benefitAmount <= 0) {
-            return null;
-        }
-
-        return PaymentResultRequest.AppliedBenefit.builder()
-                .benefitAmount(benefitAmount)
                 .build();
     }
 
