@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 
 import com.erumpay.payment.remote.domain.entity.RemotePayRequestEntity;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -13,14 +14,21 @@ import lombok.NoArgsConstructor;
 @Getter
 @AllArgsConstructor
 @NoArgsConstructor
+@Schema(description = "원격결제 요청 생성/조회/상태 변경 응답. request_id는 프론트와 Core가 원격결제 흐름을 추적하는 remoteRequestId로 사용한다.")
 public class RemotePayCreateResponse {
 
+    @Schema(description = "원격결제 요청 ID. 더치페이의 dutchSessionId와 같은 추적 키 역할을 한다.", example = "2001")
     private Long request_id;
+    @Schema(description = "원격결제를 요청한 사용자 ID", example = "1")
     private Long requester_user_id;
+    @Schema(description = "실제로 결제할 대리결제자 사용자 ID", example = "3")
     private Long target_user_id;
+    @Schema(description = "연결된 Core payment_orders.payment_id", example = "10001")
     private Long payment_id;
+    @Schema(description = "원격결제 금액", example = "10000")
     private Long amount;
     private String description;
+    @Schema(description = "원격결제 요청 상태", example = "PENDING")
     private String status;
     private String reject_reason;
     private LocalDateTime expires_at;
