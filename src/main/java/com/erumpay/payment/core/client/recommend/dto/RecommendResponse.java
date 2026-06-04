@@ -16,7 +16,7 @@ import lombok.ToString;
 @NoArgsConstructor
 @Getter
 @ToString
-@JsonIgnoreProperties(ignoreUnknown = true)
+// @JsonIgnoreProperties(ignoreUnknown = true)
 public class RecommendResponse {
 
     private Long paymentId;
@@ -28,7 +28,7 @@ public class RecommendResponse {
     @NoArgsConstructor
     @Getter
     @ToString
-    @JsonIgnoreProperties(ignoreUnknown = true)
+    // @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Result {
         private String strategyType;
         private Long totalBenefitAmount;
@@ -41,14 +41,17 @@ public class RecommendResponse {
     @NoArgsConstructor
     @Getter
     @ToString
-    @JsonIgnoreProperties(ignoreUnknown = true)
+    // @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Card {
+        private Long paymentCardId;
         private Long cardId;
         private Long cardProductId;
         private String cardCompany;
         private String cardName;
         private String maskedNumber;
+        private Long approvedAmount;
         private Long amount;
+        private AppliedBenefit appliedBenefit;
         private Long discountAmount;
         private Long cashbackAmount;
         private Long mileageAmount;
@@ -59,5 +62,17 @@ public class RecommendResponse {
         private Long expectedPerformanceAmount;
         private Boolean willReachTarget;
         private List<String> warnings;
+    }
+
+    @Builder
+    @AllArgsConstructor
+    @NoArgsConstructor
+    @Getter
+    @ToString
+    // @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class AppliedBenefit {
+        private Long benefitId;
+        private Long tierId;
+        private Long benefitAmount;
     }
 }

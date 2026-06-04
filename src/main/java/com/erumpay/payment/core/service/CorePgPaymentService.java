@@ -16,6 +16,8 @@ import com.erumpay.payment.core.client.card.CardClient;
 import com.erumpay.payment.core.client.card.dto.CardBillingKeyResponse;
 import com.erumpay.payment.core.client.card.dto.CardBillingKeysRequest;
 import com.erumpay.payment.core.client.card.dto.CardBillingKeysResponse;
+import com.erumpay.payment.core.client.card.dto.PaymentResultRequest;
+import com.erumpay.payment.core.client.card.dto.PaymentResultResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
@@ -25,6 +27,7 @@ import com.erumpay.payment.core.dao.EventRepository;
 import com.erumpay.payment.core.domain.dto.CoreSseEventType;
 import com.erumpay.payment.core.domain.dto.PaidCardRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
+import com.erumpay.payment.core.domain.entity.CardDetailEntity;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.domain.entity.EventEntity;
 import com.erumpay.payment.core.exception.CustomException;
@@ -52,6 +55,7 @@ public class CorePgPaymentService {
     private static final String PG_STATUS_REJECTED = "REJECTED";
     private static final String PG_STATUS_FAILED = "FAILED";
     private static final String PG_STATUS_VOIDED = "VOIDED";
+    private static final String CARD_EVENT_APPROVED = "APPROVED";
     private static final String HOST_AUTH_STATUS_AUTHORIZED = "AUTHORIZED";
     private static final String HOST_AUTH_STATUS_FAILED = "FAILED";
     private static final String PARTICIPANT_PAYMENT_STATUS_PAID = "PAID";
@@ -79,7 +83,8 @@ public class CorePgPaymentService {
 
         boolean useAuthOnly = shouldUseAuthOnly(payment);
 
-        RecommendResponse.Result selectedRecommendation = validateRecommendationSelection(payment.getPaymentId(), request);
+        RecommendResponse.Result selectedRecommendation = validateRecommendationSelection(payment.getPaymentId(),
+                request);
 
         Map<Long, CardBillingKeyResponse> billingKeys = fetchBillingKeysOrThrow(payment, request.getCards());
 
@@ -207,7 +212,7 @@ public class CorePgPaymentService {
 
             try {
                 PgAuthPayResponse cancelResponse = pgClient.pgPaymentCancelRequest(
-                        AUTHORIZATION,
+                        pgAuthorization,
                         compensationIdempotencyKey,
                         pgTxnId,
                         cancelRequest);
@@ -360,6 +365,7 @@ public class CorePgPaymentService {
                 firstPgResponse,
                 selectedRecommendation.getStrategyType());
 
+        List<CardDetailEntity> savedCardDetails = new ArrayList<>();
         try {
             for (ApprovedCardPayment approvedPayment : approvedPayments) {
                 PaidCardRequest paidCard = buildPaidCardRequest(
@@ -368,7 +374,7 @@ public class CorePgPaymentService {
                         approvedPayment.card(),
                         approvedPayment.billingKey(),
                         selectedRecommendation);
-                corePgPaymentPersistenceService.savePaidCardDetail(paidCard);
+                savedCardDetails.add(corePgPaymentPersistenceService.savePaidCardDetail(paidCard));
             }
         } catch (RuntimeException e) {
             log.error(
@@ -376,6 +382,12 @@ public class CorePgPaymentService {
                     payment.getPaymentId(),
                     e);
         }
+        notifyCardPaymentApproved(
+                payment,
+                savedCardDetails,
+                approvedPayments,
+                selectedRecommendation,
+                firstPgResponse);
         notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, firstPgResponse);
         notifyRemotePaymentResultIfNeeded(payment);
         notifyHostFinalPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_PAID, firstPgResponse);
@@ -560,6 +572,116 @@ public class CorePgPaymentService {
                 .discountAmount(discountAmount)
                 .benefitDesc(benefitDesc)
                 .paidAt(paidAt)
+                .build();
+    }
+
+    private void notifyCardPaymentApproved(
+            CoreEntity payment,
+            List<CardDetailEntity> savedCardDetails,
+            List<ApprovedCardPayment> approvedPayments,
+            RecommendResponse.Result selectedRecommendation,
+            PgAuthPayResponse firstPgResponse) {
+        if (payment.getUserId() == null) {
+            log.error("card payment result notify skipped. paymentId={}, eventType={}, userId=null",
+                    payment.getPaymentId(),
+                    CARD_EVENT_APPROVED);
+            return;
+        }
+
+        try {
+            PaymentResultRequest request = PaymentResultRequest.builder()
+                    .paymentId(payment.getPaymentId())
+                    .eventType(CARD_EVENT_APPROVED)
+                    .occurredAt(resolvePaymentResultOccurredAt(firstPgResponse))
+                    .cards(buildApprovedPaymentResultCards(
+                            savedCardDetails,
+                            approvedPayments,
+                            selectedRecommendation))
+                    .build();
+
+            PaymentResultResponse response = cardClient.paymentResultSend(payment.getUserId(), request);
+            log.info(
+                    "card payment result notify success. paymentId={}, userId={}, eventType={}, applied={}, appliedCardCount={}, reason={}",
+                    payment.getPaymentId(),
+                    payment.getUserId(),
+                    CARD_EVENT_APPROVED,
+                    response == null ? null : response.getApplied(),
+                    response == null ? null : response.getAppliedCardCount(),
+                    response == null ? null : response.getReason());
+        } catch (RuntimeException e) {
+            log.error("card payment result notify failed. paymentId={}, userId={}, eventType={}",
+                    payment.getPaymentId(),
+                    payment.getUserId(),
+                    CARD_EVENT_APPROVED,
+                    e);
+        }
+    }
+
+    private LocalDateTime resolvePaymentResultOccurredAt(PgAuthPayResponse pgResponse) {
+        if (pgResponse == null) {
+            return LocalDateTime.now();
+        }
+        if (pgResponse.getApprovedAt() != null) {
+            return pgResponse.getApprovedAt();
+        }
+        if (pgResponse.getProcessedAt() != null) {
+            return pgResponse.getProcessedAt();
+        }
+        return LocalDateTime.now();
+    }
+
+    private List<PaymentResultRequest.Card> buildApprovedPaymentResultCards(
+            List<CardDetailEntity> savedCardDetails,
+            List<ApprovedCardPayment> approvedPayments,
+            RecommendResponse.Result selectedRecommendation) {
+        if (savedCardDetails != null && savedCardDetails.size() == approvedPayments.size()) {
+            return savedCardDetails.stream()
+                    .map(this::toPaymentResultCard)
+                    .toList();
+        }
+
+        return approvedPayments.stream()
+                .map(approvedPayment -> toPaymentResultCard(approvedPayment, selectedRecommendation))
+                .toList();
+    }
+
+    private PaymentResultRequest.Card toPaymentResultCard(CardDetailEntity cardDetail) {
+        return PaymentResultRequest.Card.builder()
+                .paymentCardId(cardDetail.getPayment_card_id())
+                .cardId(cardDetail.getCard_id())
+                .approvedAmount(cardDetail.getPaid_amount())
+                .approvedAt(cardDetail.getPaid_at())
+                .appliedBenefit(toAppliedBenefit(cardDetail.getDiscount_amount()))
+                .build();
+    }
+
+    private PaymentResultRequest.Card toPaymentResultCard(
+            ApprovedCardPayment approvedPayment,
+            RecommendResponse.Result selectedRecommendation) {
+        PinAndPayRequest.CardPortion card = approvedPayment.card();
+        PgAuthPayResponse pgResponse = approvedPayment.pgResponse();
+        RecommendResponse.Card recommendedCard = selectedRecommendation == null ? null
+                : findMatchingRecommendedCard(selectedRecommendation.getCards(), card);
+        Long approvedAmount = pgResponse == null || pgResponse.getAmount() == null
+                ? card.getAmount()
+                : pgResponse.getAmount();
+        Long discountAmount = recommendedCard == null ? null : recommendedCard.getDiscountAmount();
+
+        return PaymentResultRequest.Card.builder()
+                .cardId(card.getCardId())
+                .approvedAmount(approvedAmount)
+                .approvedAt(resolvePaymentResultOccurredAt(pgResponse))
+                .appliedBenefit(toAppliedBenefit(discountAmount))
+                .build();
+    }
+
+    private PaymentResultRequest.AppliedBenefit toAppliedBenefit(Long benefitAmount) {
+        if (benefitAmount == null || benefitAmount <= 0) {
+            return null;
+        }
+
+        return PaymentResultRequest.AppliedBenefit.builder()
+                .benefitAmount(benefitAmount)
                 .build();
     }
 

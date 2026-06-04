@@ -43,7 +43,7 @@ public class CoreController {
     private final CoreService coreService;
     private final CoreSseService coreSseService;
 
-    // [be] 다윤 260522 개인+대표자 가승인 결제 요청
+    // [be] 다윤 260522 개인 + 대표자 가승인 + 원격 결제 요청
     @PostMapping("/prepare")
     @Operation(summary = "결제 생성 요청", description = "단일결제 또는 대표자 가승인 결제의 생성을 요청한다.")
     public ResponseEntity<PrepareResponse> preparePay(

@@ -72,16 +72,13 @@ public class CorePgPaymentPersistenceService {
 
     // [be] 다윤 260601 20:00 | 결제 성공 카드 원장 기록
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void savePaidCardDetail(PaidCardRequest paidCard) {
+    public CardDetailEntity savePaidCardDetail(PaidCardRequest paidCard) {
         if (paidCard == null || paidCard.getPaymentId() == null || paidCard.getPgTxnId() == null) {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
 
-        if (cardDetailRepository.existsByPaymentIdAndPgTxnId(paidCard.getPaymentId(), paidCard.getPgTxnId())) {
-            return;
-        }
-
-        cardDetailRepository.save(toCardDetailEntity(paidCard));
+        return cardDetailRepository.findByPaymentIdAndPgTxnId(paidCard.getPaymentId(), paidCard.getPgTxnId())
+                .orElseGet(() -> cardDetailRepository.save(toCardDetailEntity(paidCard)));
     }
 
     // [be] 다윤 260601 20:00 | 가승인 성공 원장 기록
