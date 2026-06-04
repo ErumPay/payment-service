@@ -57,6 +57,8 @@ public class RemotePayRequestEntity {
     private LocalDateTime updated_at;
     private LocalDateTime completed_at;
 
+    // 요청자가 원격결제 버튼을 누른 직후의 임시 요청이다.
+    // 아직 대리결제자를 고르기 전이라 target_user_id와 payer payment는 null이고, request_id만 먼저 발급된다.
     public static RemotePayRequestEntity draftFromCore(
             Long requesterUserId,
             Long sourcePaymentId,
@@ -86,9 +88,8 @@ public class RemotePayRequestEntity {
                 .build();
     }
 
-    // [be] 영은 260527 1005 | payment_id 없이 원격결제 요청 최초 상태를 만드는 보조 생성 경로다.
-    // [be] 영은 260528 1040 | B안의 기본 생성은 pendingFromCore이고, 이 경로는 직접 생성 테스트/호환용으로만 남긴다.
-    // [be] 영은 260527 1005 | 요청자/대상자/금액/만료 시간을 엔티티 생성 경계에서 검증해 잘못된 PENDING 요청 저장을 막는다.
+    // targetUserId를 이미 알고 있을 때 PENDING 요청을 바로 만드는 직접 생성/호환용 경로다.
+    // 현재 화면 기본 흐름은 draftFromCore -> assignTarget -> assignPayment 순서다.
     public static RemotePayRequestEntity pending(
             Long requesterUserId,
             Long targetUserId,
@@ -121,9 +122,8 @@ public class RemotePayRequestEntity {
                 .build();
     }
 
-    // [be] 영은 260528 1010 | Core /payment/prepare에서 REMOTE를 선택했을 때 사용하는 생성 경로다.
-    // [be] 영은 260528 1010 | 결제 주문은 이미 Core가 만들었으므로 원격결제 요청은 처음부터 payment_id를 연결해서 생성한다.
-    // [be] 영은 260528 1040 | payment_id와 request_id를 같은 시점에 묶어 알림/조회/완료 처리에서 동일 요청을 추적할 수 있게 한다.
+    // targetUserId를 이미 알고 있을 때 Core payment와 PENDING 요청을 한 번에 묶는 기존 내부 생성 경로다.
+    // target 후선택 흐름에서는 source payment만 가진 DRAFT를 먼저 만들고, 대리결제자 prepare 후 assignPayment로 묶는다.
     public static RemotePayRequestEntity pendingFromCore(
             Long requesterUserId,
             Long targetUserId,
@@ -164,6 +164,7 @@ public class RemotePayRequestEntity {
                 .build();
     }
 
+    // 요청자만 DRAFT 요청에 대리결제자를 지정할 수 있다. 성공하면 PENDING으로 전환된다.
     public void assignTarget(Long requesterUserId, Long targetUserId, LocalDateTime now) {
         if (requesterUserId == null || targetUserId == null || now == null) {
             throw new IllegalArgumentException("requesterUserId, targetUserId and now must not be null");
@@ -181,8 +182,6 @@ public class RemotePayRequestEntity {
             throw new IllegalStateException("remote payment request already has another target");
         }
         if (this.expires_at != null && !this.expires_at.isAfter(now)) {
-            this.status = RemotePayStatus.EXPIRED;
-            this.updated_at = now;
             throw new IllegalStateException("remote payment request is expired");
         }
 
@@ -191,6 +190,8 @@ public class RemotePayRequestEntity {
         this.updated_at = now;
     }
 
+    // 대리결제자가 만든 실제 결제 주문을 PENDING 원격결제 요청에 연결한다.
+    // target_user_id, payment.userId, amount가 모두 맞아야 이후 결제 요청으로 넘어갈 수 있다.
     public void assignPayment(Long targetUserId, CoreEntity payment, LocalDateTime now) {
         if (targetUserId == null || payment == null || now == null) {
             throw new IllegalArgumentException("targetUserId, payment and now must not be null");
@@ -261,8 +262,8 @@ public class RemotePayRequestEntity {
         if (now == null) {
             throw new IllegalArgumentException("now must not be null");
         }
-        if (this.status != RemotePayStatus.PENDING) {
-            throw new IllegalStateException("remote payment request is not pending");
+        if (this.status != RemotePayStatus.DRAFT && this.status != RemotePayStatus.PENDING) {
+            throw new IllegalStateException("remote payment request is not expirable");
         }
         if (this.expires_at != null && this.expires_at.isAfter(now)) {
             throw new IllegalStateException("remote payment request is not expired yet");
@@ -287,19 +288,18 @@ public class RemotePayRequestEntity {
         }
     }
 
-    // [be] 영은 260527 1035 | 모든 전이는 PENDING에서만 시작한다. 만료 시간이 지났으면 즉시 EXPIRED로 표시하고 전이를 중단한다.
+    // [be] 영은 260527 1035 | 결제/거절/취소/완료 전이는 PENDING에서만 시작한다.
     private void requirePending(LocalDateTime now) {
         if (this.status != RemotePayStatus.PENDING) {
             throw new IllegalStateException("remote payment request is not pending");
         }
         if (this.expires_at != null && !this.expires_at.isAfter(now)) {
-            this.status = RemotePayStatus.EXPIRED;
-            this.updated_at = now;
             throw new IllegalStateException("remote payment request is expired");
         }
     }
 
-    // [be] 영은 260528 1040 | 원격결제 요청의 업무 상태다. B안에서는 payment_id 유무와 별개로 이 상태가 전이 기준이다.
+    // DRAFT: 요청자가 원격결제를 선택했지만 아직 대리결제자를 고르지 않은 상태.
+    // PENDING: 대리결제자가 지정되어 결제/거절/취소를 기다리는 상태.
     public enum RemotePayStatus {
         DRAFT,
         PENDING,

@@ -50,6 +50,8 @@ app:
     topics:
       recommend-command: ${RECOMMEND_COMMAND_TOPIC:recommend.command}
       recommend-event: ${RECOMMEND_EVENT_TOPIC:recommend.event}
+      dutch-event: ${DUTCH_EVENT_TOPIC:dutch.event}
+      remote-event: ${REMOTE_EVENT_TOPIC:remote.event}
   redis:
     channels:
       core-pay-events: ${CORE_PAY_EVENT_CHANNEL:core-pay:events}

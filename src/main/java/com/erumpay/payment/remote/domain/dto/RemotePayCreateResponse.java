@@ -23,7 +23,8 @@ public class RemotePayCreateResponse {
     private Long requester_user_id;
     @Schema(description = "실제로 결제할 대리결제자 사용자 ID", example = "3")
     private Long target_user_id;
-    @Schema(description = "연결된 Core payment_orders.payment_id", example = "10001")
+    @Deprecated
+    @Schema(description = "Deprecated. 대리결제자 실제 결제 ID 호환 필드. 신규 연동은 payer_payment_id를 사용한다.", example = "10002")
     private Long payment_id;
     @Schema(description = "QR에서 먼저 생성된 원본 payment_orders.payment_id", example = "10001")
     private Long source_payment_id;
@@ -41,7 +42,7 @@ public class RemotePayCreateResponse {
     private LocalDateTime completed_at;
 
     // [be] 영은 260527 1010 | 요청 생성/조회/취소/거절 응답을 하나로 맞춰 프론트가 같은 모델로 화면을 갱신하게 한다.
-    // [be] 영은 260527 1010 | payment_id는 prepare 전에는 null이고, prepare 이후에는 연결된 payment_orders 식별자로 내려간다.
+    // [be] 영은 260605 1600 | payment_id는 기존 응답 호환용 alias이고, 신규 연동은 source_payment_id/payer_payment_id를 구분해서 사용한다.
     public static RemotePayCreateResponse fromEntity(RemotePayRequestEntity request) {
         return RemotePayCreateResponse.builder()
                 .request_id(request.getRequest_id())

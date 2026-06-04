@@ -24,6 +24,7 @@ import com.erumpay.payment.remote.domain.dto.RemotePayExpireBatchResponse;
 import com.erumpay.payment.remote.domain.entity.RemotePayRequestEntity;
 import com.erumpay.payment.remote.domain.entity.RemotePayRequestEntity.RemotePayStatus;
 import com.erumpay.payment.remote.domain.dto.RemotePayTargetAssignRequest;
+import com.erumpay.payment.notification.service.PaymentNotificationEventPublisher;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,14 +38,14 @@ public class RemotePayService {
     private final CoreRepository coreRepository;
     private final RemotePayFriendValidator remotePayFriendValidator;
     private final RemotePaySseService remotePaySseService;
+    private final PaymentNotificationEventPublisher notificationEventPublisher;
     private final TransactionTemplate transactionTemplate;
 
     @Value("${app.remote-pay.expires-after-minutes:30}")
     private long expiresAfterMinutes;
 
-    // [be] 영은 260527 1000 | 원격결제 요청 생성 - 초기 테스트/직접 생성용 흐름이다.
-    // [be] 영은 260528 1040 | 최종 B안의 기본 진입점은 Core /payment/prepare이며, 이 메서드는 payment_id 없이 요청만 만들 때 사용한다.
-    // [be] 영은 260527 1000 | 친구 검증은 외부 호출이므로 DB 트랜잭션 밖에서 먼저 처리해 원격 지연이 DB 락으로 이어지지 않게 한다.
+    // targetUserId를 이미 알고 있는 직접 생성/호환용 공개 API 흐름이다.
+    // 현재 모바일 화면의 기본 흐름은 Core가 draft를 먼저 만들고, 이후 target을 지정하는 방식이다.
     public RemotePayCreateResponse createRequest(Long requesterUserId, RemotePayCreateRequest request) {
         log.info("/api/v1/remote-pay/requests Service");
 
@@ -56,13 +57,12 @@ public class RemotePayService {
 
         RemotePayCreateResponse response = transactionTemplate.execute(status -> savePendingRequest(requesterUserId, request));
         publishRequestUpdated(response.getRequest_id(), "REQUEST_CREATED", response);
+        notificationEventPublisher.publishRemoteRequested(response);
         return response;
     }
 
-    // [be] 영은 260528 1010 | Core /payment/prepare에서 REMOTE 선택 시 내부 호출하는 원격결제 요청 생성 흐름이다.
-    // [be] 영은 260528 1010 | 결제 주문 생성과 상태 관리는 Core가 담당하므로, remote-pay는 전달받은 payment_id에 request_id를 연결한다.
-    // [be] 영은 260604 1910 | payment.userId는 대리결제자(targetUserId)이거나 아직 비어 있어야 한다.
-    // 요청자 userId로 먼저 배정하면 대리결제자가 실제 결제를 진행할 때 소유자 검증이 꼬일 수 있다.
+    // targetUserId를 이미 알고 있을 때 Core가 호출하는 기존 내부 API다.
+    // 현재 화면처럼 target을 나중에 고르는 흐름에서는 createDraftFromCore -> assignTarget을 사용한다.
     public RemotePayCreateResponse createRequestFromCore(Long requesterUserId, RemotePayCoreCreateRequest request) {
         log.info("/internal/v1/remote-pay/requests Service");
 
@@ -79,9 +79,12 @@ public class RemotePayService {
                 status -> savePendingRequestFromCore(requesterUserId, request.getTarget_user_id(), payment,
                         request.getDescription()));
         publishRequestUpdated(response.getRequest_id(), "REQUEST_CREATED", response);
+        notificationEventPublisher.publishRemoteRequested(response);
         return response;
     }
 
+    // 요청자가 원격결제 버튼을 누르는 순간 Core가 호출한다.
+    // 아직 대리결제자를 고르기 전이므로 target_user_id와 payer_payment_id는 비워 둔 DRAFT 요청을 만든다.
     public RemotePayCreateResponse createDraftFromCore(Long requesterUserId, RemotePayDraftCreateRequest request) {
         log.info("/internal/v1/remote-pay/requests/draft Service");
 
@@ -94,12 +97,12 @@ public class RemotePayService {
 
         RemotePayCreateResponse response = transactionTemplate.execute(
                 status -> saveDraftRequestFromCore(requesterUserId, sourcePayment, request.getDescription()));
-        publishRequestUpdated(response.getRequest_id(), "REQUEST_DRAFT_CREATED", response);
+        publishAfterCommit(response.getRequest_id(), "REQUEST_DRAFT_CREATED", response);
         return response;
     }
 
-    // [be] 영은 260528 1015 | 같은 모듈 내부에서 CoreService가 HTTP 없이 직접 호출할 때 쓰는 진입점이다.
-    // [be] 영은 260528 1015 | 반환된 request_id를 Core가 prepare 응답의 remoteRequestId로 내려주면 프론트/알림이 같은 요청을 추적할 수 있다.
+    // 같은 JVM 안에서 CoreService가 targetUserId를 이미 알고 있을 때 직접 호출하는 내부 진입점이다.
+    // 모바일 화면의 target 후선택 흐름에서는 createDraftFromCore와 assignTarget이 더 자연스럽다.
     public RemotePayCreateResponse createRequestFromCore(
             Long requesterUserId,
             Long targetUserId,
@@ -114,6 +117,7 @@ public class RemotePayService {
         RemotePayCreateResponse response = transactionTemplate.execute(
                 status -> savePendingRequestFromCore(requesterUserId, targetUserId, payment, description));
         publishRequestUpdated(response.getRequest_id(), "REQUEST_CREATED", response);
+        notificationEventPublisher.publishRemoteRequested(response);
         return response;
     }
 
@@ -130,7 +134,6 @@ public class RemotePayService {
         return RemotePayCreateResponse.fromEntity(request);
     }
 
-    @Transactional
     public RemotePayCreateResponse assignTarget(Long requesterUserId, Long requestId, RemotePayTargetAssignRequest targetRequest) {
         log.info("/api/v1/remote-pay/requests/{}/target Service", requestId);
 
@@ -140,6 +143,13 @@ public class RemotePayService {
 
         remotePayFriendValidator.validate(requesterUserId, targetRequest.getTarget_user_id());
 
+        return transactionTemplate.execute(status -> assignTargetInTransaction(requesterUserId, requestId, targetRequest));
+    }
+
+    private RemotePayCreateResponse assignTargetInTransaction(
+            Long requesterUserId,
+            Long requestId,
+            RemotePayTargetAssignRequest targetRequest) {
         RemotePayRequestEntity request = getRequestForUpdate(requestId);
         try {
             request.assignTarget(requesterUserId, targetRequest.getTarget_user_id(), LocalDateTime.now());
@@ -149,11 +159,11 @@ public class RemotePayService {
 
         RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
         publishAfterCommit(response.getRequest_id(), "TARGET_ASSIGNED", response);
+        notificationEventPublisher.publishRemoteRequested(response);
         return response;
     }
 
-    // [be] 영은 260527 1020 | 진행 중 요청 목록 조회 - 홈/알림함에서 아직 PENDING인 원격결제 요청만 보여주기 위한 API다.
-    // [be] 영은 260527 1020 | 같은 사용자가 요청자/대상자 양쪽 역할을 가질 수 있어 두 컬럼을 모두 조회한다.
+    // 진행 중 요청 목록 조회. 요청자에게는 target 선택 전 DRAFT도 보여주고, 요청자/대리결제자 양쪽 역할을 모두 조회한다.
     @Transactional(readOnly = true)
     public List<RemotePayCreateResponse> getActiveRequests(Long userId) {
         log.info("/api/v1/remote-pay/requests/active Service");
@@ -170,9 +180,10 @@ public class RemotePayService {
                 .toList();
     }
 
-    // [be] 영은 260527 1430 | A안에서 쓰던 결제 주문 사후 연결 흐름이다.
-    // [be] 영은 260528 1040 | B안에서는 요청 생성 시점에 payment_id를 함께 묶으므로 Core 쪽 전환이 끝나면 제거 대상이다.
+    // 대리결제자가 Core /payment/prepare로 실제 결제 주문을 만든 직후, 그 payment를 원격결제 요청에 연결한다.
+    // 연결이 끝나야 이후 /payment/request에서 이 결제가 유효한 원격결제인지 검증할 수 있다.
     @Transactional
+    // CoreService가 같은 JVM 안에서 이미 생성한 대리결제자 payment 엔티티를 넘길 때 사용한다.
     public RemotePayCreateResponse connectPaymentForPrepare(Long targetUserId, Long requestId, CoreEntity payment) {
         RemotePayRequestEntity request = getRequestForUpdate(requestId);
         try {
@@ -186,6 +197,9 @@ public class RemotePayService {
         return response;
     }
 
+    // Core가 HTTP 내부 API로 payer_payment_id만 전달할 때 사용한다.
+    // payment 조회 이후 위 메서드에 위임해서 target/status/amount/user 검증을 한 곳으로 모은다.
+    @Transactional
     public RemotePayCreateResponse connectPaymentForPrepare(Long targetUserId, Long requestId, Long payerPaymentId) {
         if (targetUserId == null || requestId == null || payerPaymentId == null) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
@@ -211,6 +225,7 @@ public class RemotePayService {
 
         RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
         publishAfterCommit(response.getRequest_id(), "REQUEST_REJECTED", response);
+        notificationEventPublisher.publishRemoteRejected(response);
         return response;
     }
 
@@ -242,11 +257,13 @@ public class RemotePayService {
 
         RemotePayRequestEntity request = getRequestForPayment(payment);
         try {
-            request.complete(payment, LocalDateTime.now());
+        request.complete(payment, LocalDateTime.now());
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new CustomException(ErrorCode.BAD_REQUEST, e);
         }
-        publishAfterCommit(request.getRequest_id(), "PAYMENT_COMPLETED", RemotePayCreateResponse.fromEntity(request));
+        RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
+        publishAfterCommit(request.getRequest_id(), "PAYMENT_COMPLETED", response);
+        notificationEventPublisher.publishRemoteCompleted(response);
     }
 
     // [be] 영은 260527 1440 | Core가 PG 요청 직전에 호출해 취소/거절/만료된 원격결제가 결제되지 않도록 막는다.
@@ -272,7 +289,7 @@ public class RemotePayService {
 
         LocalDateTime now = LocalDateTime.now();
         List<Long> targetIds = remotePayRequestRepository.findExpiredTargetIds(
-                RemotePayStatus.PENDING,
+                List.of(RemotePayStatus.DRAFT, RemotePayStatus.PENDING),
                 now);
         List<RemotePayExpireBatchResponse.ExpiredRequest> expiredRequests = new ArrayList<>();
         List<Long> failedRequestIds = new ArrayList<>();
