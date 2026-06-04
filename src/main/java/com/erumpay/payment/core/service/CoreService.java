@@ -36,12 +36,15 @@ import com.erumpay.payment.core.domain.dto.CanceledResponse;
 import com.erumpay.payment.core.domain.dto.CoreSseEventType;
 import com.erumpay.payment.core.domain.dto.DutchMemberPrepareRequest;
 import com.erumpay.payment.core.domain.dto.PaymentDetailResponse;
+import com.erumpay.payment.core.domain.dto.PaymentAllFetchRequest;
+import com.erumpay.payment.core.domain.dto.PaymentAllFetchResponse;
 import com.erumpay.payment.core.domain.dto.PaymentListResonse;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
 import com.erumpay.payment.core.domain.dto.PrepareRequest;
 import com.erumpay.payment.core.domain.dto.PrepareResponse;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity;
+import com.erumpay.payment.core.domain.entity.CardDetailEntity.CardStatus;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -64,6 +67,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Transactional
 public class CoreService {
+    private static final String CARD_EVENT_CANCELED = "CANCELED";
     private static final String PG_STATUS_REJECTED = "REJECTED";
     private static final String PG_STATUS_CANCELLED = "CANCELLED";
     private static final String PG_STATUS_FAILED = "FAILED";
@@ -261,6 +265,51 @@ public class CoreService {
                 .page((long) paymentSlice.getNumber())
                 .size((long) paymentSlice.getSize())
                 .hasNext(paymentSlice.hasNext())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public PaymentAllFetchResponse getRecommendationUsageSummary(
+            Long userId,
+            PaymentAllFetchRequest request) {
+        if (userId == null
+                || request == null
+                || request.getFrom() == null
+                || request.getTo() == null
+                || request.getFrom().isAfter(request.getTo())) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        LocalDateTime fromDateTime = request.getFrom().atStartOfDay();
+        LocalDateTime toDateTime = request.getTo().plusDays(1).atStartOfDay();
+
+        CoreRepository.PaymentUsageTotalProjection total = coreRepository.findPaymentUsageTotal(
+                userId,
+                fromDateTime,
+                toDateTime,
+                CoreEntity.PaymentStatus.PAID);
+
+        return PaymentAllFetchResponse.builder()
+                .userId(userId)
+                .from(request.getFrom())
+                .to(request.getTo())
+                .totalAmount(total == null ? 0L : nullToZero(total.getTotalAmount()))
+                .paymentCount(total == null ? 0L : nullToZero(total.getPaymentCount()))
+                .merchantUsages(coreRepository.findMerchantUsages(
+                        userId,
+                        fromDateTime,
+                        toDateTime,
+                        CoreEntity.PaymentStatus.PAID).stream()
+                        .map(this::toMerchantUsage)
+                        .toList())
+                .cardUsages(cardDetailRepository.findCardUsages(
+                        userId,
+                        fromDateTime,
+                        toDateTime,
+                        CoreEntity.PaymentStatus.PAID,
+                        CardStatus.PAID).stream()
+                        .map(this::toCardUsage)
+                        .toList())
                 .build();
     }
 
@@ -678,6 +727,27 @@ public class CoreService {
                 .orderName(payment.getOrder_name())
                 .paidAt(payment.getPaidAt())
                 .build();
+    }
+
+    private PaymentAllFetchResponse.MerchantUsage toMerchantUsage(
+            CoreRepository.MerchantUsageProjection projection) {
+        return PaymentAllFetchResponse.MerchantUsage.builder()
+                .merchantName(projection.getMerchantName())
+                .paymentCount(nullToZero(projection.getPaymentCount()))
+                .paidAmount(nullToZero(projection.getPaidAmount()))
+                .build();
+    }
+
+    private PaymentAllFetchResponse.CardUsage toCardUsage(CardDetailRepository.CardUsageProjection projection) {
+        return PaymentAllFetchResponse.CardUsage.builder()
+                .cardId(projection.getCardId())
+                .paymentCount(nullToZero(projection.getPaymentCount()))
+                .paidAmount(nullToZero(projection.getPaidAmount()))
+                .build();
+    }
+
+    private Long nullToZero(Long value) {
+        return value == null ? 0L : value;
     }
 
     private PaymentDetailResponse toPaymentDetailResponse(CoreEntity payment, List<CardDetailEntity> cardDetails) {

@@ -32,16 +32,17 @@ public class CoreSwaggerConfig {
     public GroupedOpenApi coreGroupedOpenApi() {
         return GroupedOpenApi.builder()
                 .group("core-payment")
-                .pathsToMatch("/api/v1/payment/**")
+                .pathsToMatch("/api/v1/payment/**", "/internal/v1/payments/**")
                 .addOpenApiCustomizer(openApi -> {
                     if (openApi.getPaths() == null) {
                         return;
                     }
 
                     openApi.getPaths().forEach((path, pathItem) -> {
+                        boolean isCorePaymentApi = path.startsWith("/api/v1/payment/");
                         boolean isQrApi = path.startsWith("/api/v1/payment/qr/");
                         pathItem.readOperationsMap().forEach((httpMethod, operation) -> {
-                            if (!isQrApi) {
+                            if (isCorePaymentApi && !isQrApi) {
                                 addUserIdHeader(operation);
 
                                 if (PathItem.HttpMethod.POST.equals(httpMethod)) {

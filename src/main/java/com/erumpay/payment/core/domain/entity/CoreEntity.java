@@ -1,6 +1,7 @@
 package com.erumpay.payment.core.domain.entity;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Locale;
 
 import jakarta.persistence.Column;
@@ -144,9 +145,10 @@ public class CoreEntity {
         if (paidAt == null) {
             throw new IllegalArgumentException("paidAt must not be null");
         }
+        LocalDateTime paidAtMinute = paidAt.truncatedTo(ChronoUnit.MINUTES);
         this.payment_status = PaymentStatus.PAID;
-        this.paidAt = paidAt;
-        this.updatedAt = paidAt;
+        this.paidAt = paidAtMinute;
+        this.updatedAt = paidAtMinute;
     }
 
     // [be] 다윤 260528 가승인 성공 status 업데이트
