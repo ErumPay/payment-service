@@ -6,7 +6,6 @@ import org.springframework.stereotype.Component;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.remote.client.auth.AuthFriendClient;
-import com.erumpay.payment.remote.client.auth.dto.AuthFriendValidateRequest;
 import com.erumpay.payment.remote.client.auth.dto.AuthFriendValidateResponse;
 
 import feign.FeignException;
@@ -34,8 +33,7 @@ public class RemotePayFriendValidator {
 
         AuthFriendValidateResponse response;
         try {
-            response = authFriendClient.validateFriend(
-                    new AuthFriendValidateRequest(requesterUserId, targetUserId));
+            response = authFriendClient.validateFriend(requesterUserId, targetUserId);
         } catch (FeignException e) {
             log.warn("Auth friend validation failed. status={}, requesterUserId={}, targetUserId={}",
                     e.status(),
