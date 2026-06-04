@@ -59,6 +59,8 @@ public class RemotePayService {
 
     // [be] 영은 260528 1010 | Core /payment/prepare에서 REMOTE 선택 시 내부 호출하는 원격결제 요청 생성 흐름이다.
     // [be] 영은 260528 1010 | 결제 주문 생성과 상태 관리는 Core가 담당하므로, remote-pay는 전달받은 payment_id에 request_id를 연결한다.
+    // [be] 영은 260604 1910 | payment.userId는 대리결제자(targetUserId)이거나 아직 비어 있어야 한다.
+    // 요청자 userId로 먼저 배정하면 대리결제자가 실제 결제를 진행할 때 소유자 검증이 꼬일 수 있다.
     public RemotePayCreateResponse createRequestFromCore(Long requesterUserId, RemotePayCoreCreateRequest request) {
         log.info("/internal/v1/remote-pay/requests Service");
 
