@@ -1,5 +1,7 @@
 package com.erumpay.payment.core.dao;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Pageable;
@@ -43,4 +45,51 @@ public interface CoreRepository extends JpaRepository<CoreEntity, Long> {
                         @Param("userId") Long userId,
                         @Param("paymentStatuses") java.util.List<CoreEntity.PaymentStatus> paymentStatuses,
                         Pageable pageable);
+
+        @Query("""
+                        select coalesce(sum(o.amount), 0) as totalAmount,
+                               count(o) as paymentCount
+                        from CoreEntity o
+                        where o.userId = :userId
+                          and o.payment_status = :paymentStatus
+                          and o.paidAt >= :from
+                          and o.paidAt < :to
+                        """)
+        PaymentUsageTotalProjection findPaymentUsageTotal(
+                        @Param("userId") Long userId,
+                        @Param("from") LocalDateTime from,
+                        @Param("to") LocalDateTime to,
+                        @Param("paymentStatus") CoreEntity.PaymentStatus paymentStatus);
+
+        @Query("""
+                        select coalesce(o.merchant_name, o.order_name) as merchantName,
+                               count(o) as paymentCount,
+                               coalesce(sum(o.amount), 0) as paidAmount
+                        from CoreEntity o
+                        where o.userId = :userId
+                          and o.payment_status = :paymentStatus
+                          and o.paidAt >= :from
+                          and o.paidAt < :to
+                        group by coalesce(o.merchant_name, o.order_name)
+                        order by paidAmount desc, paymentCount desc
+                        """)
+        List<MerchantUsageProjection> findMerchantUsages(
+                        @Param("userId") Long userId,
+                        @Param("from") LocalDateTime from,
+                        @Param("to") LocalDateTime to,
+                        @Param("paymentStatus") CoreEntity.PaymentStatus paymentStatus);
+
+        interface PaymentUsageTotalProjection {
+                Long getTotalAmount();
+
+                Long getPaymentCount();
+        }
+
+        interface MerchantUsageProjection {
+                String getMerchantName();
+
+                Long getPaymentCount();
+
+                Long getPaidAmount();
+        }
 }
