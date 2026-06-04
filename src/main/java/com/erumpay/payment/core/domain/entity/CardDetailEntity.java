@@ -2,7 +2,10 @@ package com.erumpay.payment.core.domain.entity;
 
 import java.time.LocalDateTime;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -34,4 +37,29 @@ public class CardDetailEntity {
     private String benefit_desc;
     private LocalDateTime paid_at;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "card_status", nullable = false)
+    private CardStatus card_status;
+
+    private LocalDateTime canceled_at;
+
+    public void markCancelRequested() {
+        this.card_status = CardStatus.CANCEL_REQUESTED;
+    }
+
+    public void markCanceled(LocalDateTime canceledAt) {
+        this.card_status = CardStatus.CANCELED;
+        this.canceled_at = canceledAt;
+    }
+
+    public void markCancelFailed() {
+        this.card_status = CardStatus.CANCEL_FAILED;
+    }
+
+    public enum CardStatus {
+        PAID,
+        CANCEL_REQUESTED,
+        CANCELED,
+        CANCEL_FAILED
+    }
 }

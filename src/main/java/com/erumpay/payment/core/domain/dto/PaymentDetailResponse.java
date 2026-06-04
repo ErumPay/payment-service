@@ -43,6 +43,8 @@ public class PaymentDetailResponse {
         private Long paidAmount;
         private Long discountAmount;
         private String benefitDesc;
+        private String cardStatus;
+        private LocalDateTime canceledAt;
 
     }
 

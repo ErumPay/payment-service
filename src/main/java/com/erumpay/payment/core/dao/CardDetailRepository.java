@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.erumpay.payment.core.domain.entity.CardDetailEntity;
+import com.erumpay.payment.core.domain.entity.CardDetailEntity.CardStatus;
 
 public interface CardDetailRepository extends JpaRepository<CardDetailEntity, Long> {
     @Query("""
@@ -18,8 +19,20 @@ public interface CardDetailRepository extends JpaRepository<CardDetailEntity, Lo
             """)
     List<CardDetailEntity> findAllByPaymentId(@Param("paymentId") Long paymentId);
 
-    @Query("select c from CardDetailEntity c where c.payment_id = :paymentId and c.pg_txn_id is not null")
-    List<CardDetailEntity> findCancelableCardsByPaymentId(@Param("paymentId") Long paymentId);
+    default List<CardDetailEntity> findCancelableCardsByPaymentId(Long paymentId) {
+        return findCancelableCardsByPaymentIdAndStatusNot(paymentId, CardStatus.CANCELED);
+    }
+
+    @Query("""
+            select c
+            from CardDetailEntity c
+            where c.payment_id = :paymentId
+              and c.pg_txn_id is not null
+              and c.card_status <> :excludedStatus
+            """)
+    List<CardDetailEntity> findCancelableCardsByPaymentIdAndStatusNot(
+            @Param("paymentId") Long paymentId,
+            @Param("excludedStatus") CardStatus excludedStatus);
 
     @Query("select c from CardDetailEntity c where c.payment_id = :paymentId and c.pg_txn_id = :pgTxnId")
     Optional<CardDetailEntity> findByPaymentIdAndPgTxnId(
