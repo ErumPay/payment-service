@@ -12,6 +12,7 @@ import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.dao.EventRepository;
 import com.erumpay.payment.core.domain.dto.PaidCardRequest;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity;
+import com.erumpay.payment.core.domain.entity.CardDetailEntity.CardStatus;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.domain.entity.EventEntity;
 import com.erumpay.payment.core.exception.CustomException;
@@ -84,6 +85,24 @@ public class CorePgPaymentPersistenceService {
         cardDetailRepository.save(toCardDetailEntity(paidCard));
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markCardCancelRequested(Long paymentCardId) {
+        CardDetailEntity cardDetail = findCardDetailOrThrow(paymentCardId);
+        cardDetail.markCancelRequested();
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markCardCanceled(Long paymentCardId, LocalDateTime canceledAt) {
+        CardDetailEntity cardDetail = findCardDetailOrThrow(paymentCardId);
+        cardDetail.markCanceled(canceledAt);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markCardCancelFailed(Long paymentCardId) {
+        CardDetailEntity cardDetail = findCardDetailOrThrow(paymentCardId);
+        cardDetail.markCancelFailed();
+    }
+
     // [be] 다윤 260601 20:00 | 가승인 성공 원장 기록
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markAuthorizedAndSaveEvent(Long paymentId, PgAuthPayResponse pgResponse) {
@@ -133,6 +152,11 @@ public class CorePgPaymentPersistenceService {
         return null;
     }
 
+    private CardDetailEntity findCardDetailOrThrow(Long paymentCardId) {
+        return cardDetailRepository.findById(paymentCardId)
+                .orElseThrow(() -> new CustomException(ErrorCode.CANCELED_CARD_INVALID));
+    }
+
     private CardDetailEntity toCardDetailEntity(PaidCardRequest paidCard) {
         if (paidCard == null
                 || paidCard.getPaymentId() == null
@@ -158,6 +182,7 @@ public class CorePgPaymentPersistenceService {
                 .discount_amount(paidCard.getDiscountAmount())
                 .benefit_desc(paidCard.getBenefitDesc())
                 .paid_at(paidCard.getPaidAt())
+                .card_status(CardStatus.PAID)
                 .build();
     }
 }

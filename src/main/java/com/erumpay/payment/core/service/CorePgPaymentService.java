@@ -79,7 +79,8 @@ public class CorePgPaymentService {
 
         boolean useAuthOnly = shouldUseAuthOnly(payment);
 
-        RecommendResponse.Result selectedRecommendation = validateRecommendationSelection(payment.getPaymentId(), request);
+        RecommendResponse.Result selectedRecommendation = validateRecommendationSelection(payment.getPaymentId(),
+                request);
 
         Map<Long, CardBillingKeyResponse> billingKeys = fetchBillingKeysOrThrow(payment, request.getCards());
 
@@ -207,7 +208,7 @@ public class CorePgPaymentService {
 
             try {
                 PgAuthPayResponse cancelResponse = pgClient.pgPaymentCancelRequest(
-                        AUTHORIZATION,
+                        pgAuthorization,
                         compensationIdempotencyKey,
                         pgTxnId,
                         cancelRequest);
