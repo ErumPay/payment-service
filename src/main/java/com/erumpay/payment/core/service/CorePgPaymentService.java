@@ -649,7 +649,7 @@ public class CorePgPaymentService {
             RecommendResponse.Result selectedRecommendation) {
         if (savedCardDetails != null && savedCardDetails.size() == approvedPayments.size()) {
             return savedCardDetails.stream()
-                    .map(this::toPaymentResultCard)
+                    .map(cardDetail -> toPaymentResultCard(cardDetail, selectedRecommendation))
                     .toList();
         }
 
@@ -658,13 +658,17 @@ public class CorePgPaymentService {
                 .toList();
     }
 
-    private PaymentResultRequest.Card toPaymentResultCard(CardDetailEntity cardDetail) {
+    private PaymentResultRequest.Card toPaymentResultCard(
+            CardDetailEntity cardDetail,
+            RecommendResponse.Result selectedRecommendation) {
+        RecommendResponse.Card recommendedCard = findMatchingRecommendedCard(selectedRecommendation, cardDetail);
+
         return PaymentResultRequest.Card.builder()
                 .paymentCardId(cardDetail.getPayment_card_id())
                 .cardId(cardDetail.getCard_id())
                 .approvedAmount(cardDetail.getPaid_amount())
                 .approvedAt(cardDetail.getPaid_at())
-                .appliedBenefit(toAppliedBenefit(cardDetail.getDiscount_amount()))
+                .appliedBenefit(toAppliedBenefit(recommendedCard))
                 .build();
     }
 
@@ -678,23 +682,59 @@ public class CorePgPaymentService {
         Long approvedAmount = pgResponse == null || pgResponse.getAmount() == null
                 ? card.getAmount()
                 : pgResponse.getAmount();
-        Long discountAmount = recommendedCard == null ? null : recommendedCard.getDiscountAmount();
 
         return PaymentResultRequest.Card.builder()
                 .cardId(card.getCardId())
                 .approvedAmount(approvedAmount)
                 .approvedAt(resolvePaymentResultOccurredAt(pgResponse))
-                .appliedBenefit(toAppliedBenefit(discountAmount))
+                .appliedBenefit(toAppliedBenefit(recommendedCard))
                 .build();
     }
 
-    private PaymentResultRequest.AppliedBenefit toAppliedBenefit(Long benefitAmount) {
-        if (benefitAmount == null || benefitAmount <= 0) {
+    private RecommendResponse.Card findMatchingRecommendedCard(
+            RecommendResponse.Result selectedRecommendation,
+            CardDetailEntity cardDetail) {
+        if (selectedRecommendation == null || selectedRecommendation.getCards() == null || cardDetail == null) {
+            return null;
+        }
+
+        return selectedRecommendation.getCards().stream()
+                .filter(recommendedCard -> recommendedCard != null
+                        && cardDetail.getCard_id().equals(recommendedCard.getCardId())
+                        && cardDetail.getPaid_amount().equals(resolveRecommendedCardAmount(recommendedCard)))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Long resolveRecommendedCardAmount(RecommendResponse.Card recommendedCard) {
+        if (recommendedCard == null) {
+            return null;
+        }
+        return recommendedCard.getAmount() == null ? recommendedCard.getApprovedAmount() : recommendedCard.getAmount();
+    }
+
+    private PaymentResultRequest.AppliedBenefit toAppliedBenefit(RecommendResponse.Card recommendedCard) {
+        if (recommendedCard == null || recommendedCard.getAppliedBenefit() == null) {
+            return null;
+        }
+
+        RecommendResponse.AppliedBenefit appliedBenefit = recommendedCard.getAppliedBenefit();
+        if (appliedBenefit.getBenefitAmount() == null || appliedBenefit.getBenefitAmount() <= 0) {
+            return null;
+        }
+        if (appliedBenefit.getBenefitId() == null || appliedBenefit.getTierId() == null) {
+            log.warn("recommended appliedBenefit is incomplete. cardId={}, benefitId={}, tierId={}, benefitAmount={}",
+                    recommendedCard.getCardId(),
+                    appliedBenefit.getBenefitId(),
+                    appliedBenefit.getTierId(),
+                    appliedBenefit.getBenefitAmount());
             return null;
         }
 
         return PaymentResultRequest.AppliedBenefit.builder()
-                .benefitAmount(benefitAmount)
+                .benefitId(appliedBenefit.getBenefitId())
+                .tierId(appliedBenefit.getTierId())
+                .benefitAmount(appliedBenefit.getBenefitAmount())
                 .build();
     }
 
