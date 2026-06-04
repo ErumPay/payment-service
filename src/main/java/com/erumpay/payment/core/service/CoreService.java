@@ -68,6 +68,7 @@ public class CoreService {
     private static final String PG_STATUS_CANCELLED = "CANCELLED";
     private static final String PG_STATUS_FAILED = "FAILED";
     private static final String PG_ERROR_ALREADY_CANCELLED = "PAYMENT_ALREADY_CANCELLED";
+    private static final String CARD_EVENT_CANCELED = "CANCELED";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
     private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
     private static final Duration RECOMMENDATION_CACHE_TTL = Duration.ofMinutes(30);
