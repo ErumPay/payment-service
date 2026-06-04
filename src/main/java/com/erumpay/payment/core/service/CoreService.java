@@ -21,6 +21,9 @@ import org.springframework.transaction.annotation.Transactional;
 import com.erumpay.payment.core.client.auth.AuthClient;
 import com.erumpay.payment.core.client.auth.dto.AuthPinRequest;
 import com.erumpay.payment.core.client.auth.dto.AuthPinResponse;
+import com.erumpay.payment.core.client.card.CardClient;
+import com.erumpay.payment.core.client.card.dto.PaymentResultRequest;
+import com.erumpay.payment.core.client.card.dto.PaymentResultResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
 import com.erumpay.payment.core.client.pg.dto.PgPayCancelRequest;
@@ -74,6 +77,7 @@ public class CoreService {
             CoreEntity.PaymentStatus.CANCELED);
 
     private final PgClient pgClient;
+    private final CardClient cardClient;
     private final CardDetailRepository cardDetailRepository;
     private final CoreRepository coreRepository;
     private final CoreValidationService coreValidationService;
@@ -92,7 +96,7 @@ public class CoreService {
     @Value("${pg.authorization}")
     private String pgAuthorization;
 
-    // [be] 다윤 260526 결제 요청 시작 - 개인, 더치페이 대표자
+    // [be] 다윤 260526 결제 요청 시작 - 개인, 더치페이 대표자, 원격 요청자
     public ResponseEntity<PrepareResponse> preparePay(Long userId, String idempotencyKey, PrepareRequest request) {
         log.info("/payment/prepare Service");
 
@@ -230,6 +234,7 @@ public class CoreService {
 
         LocalDateTime canceledAt = LocalDateTime.now();
         payment.voidedStatusUpdatePayment(canceledAt);
+        notifyCardPaymentCanceled(payment, cards, canceledAt);
 
         return toCanceledResponse(payment.getPaymentId(), payment.getPayment_status(), canceledAt);
     }
@@ -577,6 +582,78 @@ public class CoreService {
                 .payPaymentId(paymentId)
                 .merchantId(payment.getMerchant_id())
                 .status(PG_STATUS_CANCELLED)
+                .build();
+    }
+
+    private void notifyCardPaymentCanceled(
+            CoreEntity payment,
+            List<CardDetailEntity> cards,
+            LocalDateTime canceledAt) {
+        if (payment.getUserId() == null) {
+            log.error("card payment result notify skipped. paymentId={}, eventType={}, userId=null",
+                    payment.getPaymentId(),
+                    CARD_EVENT_CANCELED);
+            return;
+        }
+
+        try {
+            PaymentResultRequest request = PaymentResultRequest.builder()
+                    .paymentId(payment.getPaymentId())
+                    .eventType(CARD_EVENT_CANCELED)
+                    .occurredAt(canceledAt)
+                    .cards(cards.stream()
+                            .map(this::toCanceledPaymentResultCard)
+                            .toList())
+                    .build();
+
+            logCardPaymentResultRequest(request);
+            PaymentResultResponse response = cardClient.paymentResultSend(payment.getUserId(), request);
+            log.info(
+                    "card payment result notify success. paymentId={}, userId={}, eventType={}, applied={}, appliedCardCount={}, reason={}",
+                    payment.getPaymentId(),
+                    payment.getUserId(),
+                    CARD_EVENT_CANCELED,
+                    response == null ? null : response.getApplied(),
+                    response == null ? null : response.getAppliedCardCount(),
+                    response == null ? null : response.getReason());
+        } catch (RuntimeException e) {
+            log.error("card payment result notify failed. paymentId={}, userId={}, eventType={}",
+                    payment.getPaymentId(),
+                    payment.getUserId(),
+                    CARD_EVENT_CANCELED,
+                    e);
+        }
+    }
+
+    private void logCardPaymentResultRequest(PaymentResultRequest request) {
+        try {
+            log.info("card payment result request:\n{}",
+                    objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(request));
+        } catch (JsonProcessingException e) {
+            log.warn("card payment result request logging failed. paymentId={}, eventType={}",
+                    request == null ? null : request.getPaymentId(),
+                    request == null ? null : request.getEventType(),
+                    e);
+        }
+    }
+
+    private PaymentResultRequest.Card toCanceledPaymentResultCard(CardDetailEntity cardDetail) {
+        return PaymentResultRequest.Card.builder()
+                .paymentCardId(cardDetail.getPayment_card_id())
+                .cardId(cardDetail.getCard_id())
+                .approvedAmount(cardDetail.getPaid_amount())
+                .approvedAt(cardDetail.getPaid_at())
+                .appliedBenefit(toPaymentResultAppliedBenefit(cardDetail.getDiscount_amount()))
+                .build();
+    }
+
+    private PaymentResultRequest.AppliedBenefit toPaymentResultAppliedBenefit(Long benefitAmount) {
+        if (benefitAmount == null || benefitAmount <= 0) {
+            return null;
+        }
+
+        return PaymentResultRequest.AppliedBenefit.builder()
+                .benefitAmount(benefitAmount)
                 .build();
     }
 

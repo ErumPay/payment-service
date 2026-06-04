@@ -1,6 +1,7 @@
 package com.erumpay.payment.core.dao;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -32,6 +33,11 @@ public interface CardDetailRepository extends JpaRepository<CardDetailEntity, Lo
     List<CardDetailEntity> findCancelableCardsByPaymentIdAndStatusNot(
             @Param("paymentId") Long paymentId,
             @Param("excludedStatus") CardStatus excludedStatus);
+
+    @Query("select c from CardDetailEntity c where c.payment_id = :paymentId and c.pg_txn_id = :pgTxnId")
+    Optional<CardDetailEntity> findByPaymentIdAndPgTxnId(
+            @Param("paymentId") Long paymentId,
+            @Param("pgTxnId") Long pgTxnId);
 
     @Query("select count(c) > 0 from CardDetailEntity c where c.payment_id = :paymentId and c.pg_txn_id = :pgTxnId")
     boolean existsByPaymentIdAndPgTxnId(@Param("paymentId") Long paymentId, @Param("pgTxnId") Long pgTxnId);
