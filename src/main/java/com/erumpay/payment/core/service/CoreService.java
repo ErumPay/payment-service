@@ -1,7 +1,10 @@
 package com.erumpay.payment.core.service;
 
 import java.time.Duration;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -75,6 +78,7 @@ public class CoreService {
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
     private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
     private static final Duration RECOMMENDATION_CACHE_TTL = Duration.ofMinutes(30);
+    private static final ZoneId PAYMENT_HISTORY_BUSINESS_ZONE = ZoneId.of("Asia/Seoul");
     private static final List<CoreEntity.PaymentStatus> PAYMENT_HISTORY_STATUSES = List.of(
             CoreEntity.PaymentStatus.CANCEL_REQUESTED,
             CoreEntity.PaymentStatus.PAID,
@@ -245,7 +249,15 @@ public class CoreService {
 
     // [be] 다윤 260602 10:00 | 결제 내역 전체 조회
     @Transactional(readOnly = true)
-    public PaymentListResonse getAllPayments(Long userId, int page, String status) {
+    public PaymentListResonse getAllPayments(
+            Long userId,
+            int page,
+            String status,
+            String period,
+            LocalDate start,
+            LocalDate end,
+            String paymentType,
+            String strategyType) {
         if (userId == null || page < 0) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
@@ -253,17 +265,26 @@ public class CoreService {
         int size = 20;
         Pageable pageable = buildPaymentPageable(page, size);
         List<CoreEntity.PaymentStatus> paymentStatuses = resolvePaymentListStatuses(status);
+        PaymentHistoryDateRange dateRange = resolvePaymentHistoryDateRange(period, start, end);
+        CoreEntity.PaymentType resolvedPaymentType = resolvePaymentHistoryPaymentType(paymentType);
+        CoreEntity.StrategyType resolvedStrategyType = resolvePaymentHistoryStrategyType(strategyType);
         Slice<CoreEntity> paymentSlice = coreRepository.findAllByUserIdAndPaymentStatuses(
                 userId,
                 paymentStatuses,
+                dateRange.from(),
+                dateRange.to(),
+                resolvedPaymentType,
+                resolvedStrategyType,
                 pageable);
 
-        return PaymentListResonse.builder()
-                .items(paymentSlice.getContent().stream()
+        List<PaymentListResonse.PaymentItem> items = paymentSlice.getContent().stream()
                         .map(this::toPaymentItem)
-                        .toList())
+                        .toList();
+
+        return PaymentListResonse.builder()
+                .items(items)
                 .page((long) paymentSlice.getNumber())
-                .size((long) paymentSlice.getSize())
+                .count((long) items.size())
                 .hasNext(paymentSlice.hasNext())
                 .build();
     }
@@ -332,8 +353,65 @@ public class CoreService {
         return PageRequest.of(
                 page,
                 size,
-                Sort.by(Sort.Direction.DESC, "updatedAt")
+                Sort.by(Sort.Direction.DESC, "paidAt")
                         .and(Sort.by(Sort.Direction.DESC, "paymentId")));
+    }
+
+    private PaymentHistoryDateRange resolvePaymentHistoryDateRange(String period, LocalDate start, LocalDate end) {
+        if (period != null && (start != null || end != null)) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        if (start != null || end != null) {
+            if (start == null || end == null || start.isAfter(end)) {
+                throw new CustomException(ErrorCode.BAD_REQUEST);
+            }
+            return new PaymentHistoryDateRange(start.atStartOfDay(), end.plusDays(1).atStartOfDay());
+        }
+
+        if (period == null || period.isBlank() || "ALL".equalsIgnoreCase(period.trim())) {
+            return new PaymentHistoryDateRange(null, null);
+        }
+
+        LocalDate today = LocalDate.now(PAYMENT_HISTORY_BUSINESS_ZONE);
+        LocalDate from = switch (period.trim().toUpperCase()) {
+            case "WEEK" -> today.with(DayOfWeek.MONDAY);
+            case "MONTH" -> today.withDayOfMonth(1);
+            case "YEAR" -> today.withDayOfYear(1);
+            default -> throw new CustomException(ErrorCode.BAD_REQUEST);
+        };
+
+        return new PaymentHistoryDateRange(
+                toPaymentHistoryStartOfDay(from),
+                toPaymentHistoryStartOfDay(today.plusDays(1)));
+    }
+
+    private LocalDateTime toPaymentHistoryStartOfDay(LocalDate date) {
+        return date.atStartOfDay(PAYMENT_HISTORY_BUSINESS_ZONE).toLocalDateTime();
+    }
+
+    private CoreEntity.PaymentType resolvePaymentHistoryPaymentType(String paymentType) {
+        if (paymentType == null || paymentType.isBlank() || "ALL".equalsIgnoreCase(paymentType.trim())) {
+            return null;
+        }
+
+        try {
+            return CoreEntity.PaymentType.valueOf(paymentType.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+        }
+    }
+
+    private CoreEntity.StrategyType resolvePaymentHistoryStrategyType(String strategyType) {
+        if (strategyType == null || strategyType.isBlank() || "ALL".equalsIgnoreCase(strategyType.trim())) {
+            return null;
+        }
+
+        try {
+            return CoreEntity.StrategyType.valueOf(strategyType.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+        }
     }
 
     private List<CoreEntity.PaymentStatus> resolvePaymentListStatuses(String status) {
@@ -899,6 +977,9 @@ public class CoreService {
     @FunctionalInterface
     private interface DutchPaymentPostProcessor {
         void process(CoreEntity payment);
+    }
+
+    private record PaymentHistoryDateRange(LocalDateTime from, LocalDateTime to) {
     }
 
     private static final class DutchPaymentSaveOutcome {

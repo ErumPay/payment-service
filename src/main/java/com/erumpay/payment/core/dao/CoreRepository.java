@@ -40,10 +40,18 @@ public interface CoreRepository extends JpaRepository<CoreEntity, Long> {
                         from CoreEntity o
                         where o.userId = :userId
                           and o.payment_status in :paymentStatuses
+                          and (:from is null or o.paidAt >= :from)
+                          and (:to is null or o.paidAt < :to)
+                          and (:paymentType is null or o.payment_type = :paymentType)
+                          and (:strategyType is null or o.strategy_type = :strategyType)
                         """)
         Slice<CoreEntity> findAllByUserIdAndPaymentStatuses(
                         @Param("userId") Long userId,
                         @Param("paymentStatuses") java.util.List<CoreEntity.PaymentStatus> paymentStatuses,
+                        @Param("from") LocalDateTime from,
+                        @Param("to") LocalDateTime to,
+                        @Param("paymentType") CoreEntity.PaymentType paymentType,
+                        @Param("strategyType") CoreEntity.StrategyType strategyType,
                         Pageable pageable);
 
         @Query("""

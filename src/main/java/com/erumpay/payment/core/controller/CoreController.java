@@ -1,5 +1,8 @@
 package com.erumpay.payment.core.controller;
 
+import java.time.LocalDate;
+
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -123,12 +126,25 @@ public class CoreController {
     }
 
     @GetMapping
-    @Operation(summary = "결제 내역 전체 조회", description = "결제된 내역 전체를 조회한다. status = (ALL, PAID, CANCELED)")
+    @Operation(summary = "결제 내역 전체 조회", description = "결제 내역을 날짜/결제수단/적용유형 조건으로 조회한다.")
     public ResponseEntity<PaymentListResonse> getAllPayments(
             @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
             @Parameter(description = "조회할 페이지 번호(start = 0)", required = false, example = "0") @RequestParam(name = "page", defaultValue = "0") int page,
-            @Parameter(description = "조회할 결제 상태(ALL, PAID, CANCELED)", required = false, example = "ALL") @RequestParam(name = "status", defaultValue = "ALL") String status) {
-        return ResponseEntity.ok(coreService.getAllPayments(userId, page, status));
+            @Parameter(description = "조회할 결제 상태(ALL, PAID, CANCELED)", required = false, example = "ALL") @RequestParam(name = "status", defaultValue = "ALL") String status,
+            @Parameter(description = "빠른 기간 필터(WEEK, MONTH, YEAR). 선택한 경우에만 전달", required = false) @RequestParam(name = "period", required = false) String period,
+            @Parameter(description = "조회 시작일(yyyy-MM-dd). 선택한 경우에만 전달", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) @RequestParam(name = "start", required = false) LocalDate start,
+            @Parameter(description = "조회 종료일(yyyy-MM-dd). 선택한 경우에만 전달", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) @RequestParam(name = "end", required = false) LocalDate end,
+            @Parameter(description = "결제수단(SINGLE, DUTCH, REMOTE). 선택한 경우에만 전달", required = false) @RequestParam(name = "paymentType", required = false) String paymentType,
+            @Parameter(description = "적용유형(BENEFIT_SINGLE, BENEFIT_SPLIT, PERF_SINGLE, PERF_SPLIT). 선택한 경우에만 전달", required = false) @RequestParam(name = "strategyType", required = false) String strategyType) {
+        return ResponseEntity.ok(coreService.getAllPayments(
+                userId,
+                page,
+                status,
+                period,
+                start,
+                end,
+                paymentType,
+                strategyType));
     }
 
     @GetMapping("/{paymentId}")
