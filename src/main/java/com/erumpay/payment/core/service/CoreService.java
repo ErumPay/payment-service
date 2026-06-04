@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -77,6 +78,7 @@ public class CoreService {
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
     private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
     private static final Duration RECOMMENDATION_CACHE_TTL = Duration.ofMinutes(30);
+    private static final ZoneId PAYMENT_HISTORY_BUSINESS_ZONE = ZoneId.of("Asia/Seoul");
     private static final List<CoreEntity.PaymentStatus> PAYMENT_HISTORY_STATUSES = List.of(
             CoreEntity.PaymentStatus.CANCEL_REQUESTED,
             CoreEntity.PaymentStatus.PAID,
@@ -356,6 +358,10 @@ public class CoreService {
     }
 
     private PaymentHistoryDateRange resolvePaymentHistoryDateRange(String period, LocalDate start, LocalDate end) {
+        if (period != null && (start != null || end != null)) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
         if (start != null || end != null) {
             if (start == null || end == null || start.isAfter(end)) {
                 throw new CustomException(ErrorCode.BAD_REQUEST);
@@ -367,7 +373,7 @@ public class CoreService {
             return new PaymentHistoryDateRange(null, null);
         }
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(PAYMENT_HISTORY_BUSINESS_ZONE);
         LocalDate from = switch (period.trim().toUpperCase()) {
             case "WEEK" -> today.with(DayOfWeek.MONDAY);
             case "MONTH" -> today.withDayOfMonth(1);
@@ -375,7 +381,13 @@ public class CoreService {
             default -> throw new CustomException(ErrorCode.BAD_REQUEST);
         };
 
-        return new PaymentHistoryDateRange(from.atStartOfDay(), today.plusDays(1).atStartOfDay());
+        return new PaymentHistoryDateRange(
+                toPaymentHistoryStartOfDay(from),
+                toPaymentHistoryStartOfDay(today.plusDays(1)));
+    }
+
+    private LocalDateTime toPaymentHistoryStartOfDay(LocalDate date) {
+        return date.atStartOfDay(PAYMENT_HISTORY_BUSINESS_ZONE).toLocalDateTime();
     }
 
     private CoreEntity.PaymentType resolvePaymentHistoryPaymentType(String paymentType) {
