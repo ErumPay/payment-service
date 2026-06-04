@@ -599,6 +599,7 @@ public class CorePgPaymentService {
                             selectedRecommendation))
                     .build();
 
+            logCardPaymentResultRequest(request);
             PaymentResultResponse response = cardClient.paymentResultSend(payment.getUserId(), request);
             log.info(
                     "card payment result notify success. paymentId={}, userId={}, eventType={}, applied={}, appliedCardCount={}, reason={}",
@@ -613,6 +614,18 @@ public class CorePgPaymentService {
                     payment.getPaymentId(),
                     payment.getUserId(),
                     CARD_EVENT_APPROVED,
+                    e);
+        }
+    }
+
+    private void logCardPaymentResultRequest(PaymentResultRequest request) {
+        try {
+            log.info("card payment result request:\n{}",
+                    objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(request));
+        } catch (JsonProcessingException e) {
+            log.warn("card payment result request logging failed. paymentId={}, eventType={}",
+                    request == null ? null : request.getPaymentId(),
+                    request == null ? null : request.getEventType(),
                     e);
         }
     }
