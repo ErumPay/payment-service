@@ -52,6 +52,15 @@ public interface RemotePayRequestRepository extends JpaRepository<RemotePayReque
             """)
     Optional<RemotePayRequestEntity> findByPaymentIdForUpdate(@Param("paymentId") Long paymentId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select r
+            from RemotePayRequestEntity r
+            left join fetch r.payment
+            where r.source_payment_id = :sourcePaymentId
+            """)
+    Optional<RemotePayRequestEntity> findBySourcePaymentIdForUpdate(@Param("sourcePaymentId") Long sourcePaymentId);
+
     // [be] 영은 260527 1020 | 요청자/대상자 양쪽 홈 화면에서 진행 중 원격결제 요청을 조회한다.
     @Query("""
             select r

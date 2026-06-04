@@ -39,6 +39,7 @@ public class RemotePayRequestEntity {
 
     private Long requester_user_id;
     private Long target_user_id;
+    private Long source_payment_id;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "payment_id")
@@ -55,6 +56,35 @@ public class RemotePayRequestEntity {
     private LocalDateTime created_at;
     private LocalDateTime updated_at;
     private LocalDateTime completed_at;
+
+    public static RemotePayRequestEntity draftFromCore(
+            Long requesterUserId,
+            Long sourcePaymentId,
+            Long amount,
+            String description,
+            LocalDateTime expiresAt,
+            LocalDateTime now) {
+        if (requesterUserId == null || sourcePaymentId == null || amount == null || expiresAt == null || now == null) {
+            throw new IllegalArgumentException("required remote payment draft fields must not be null");
+        }
+        if (amount <= 0) {
+            throw new IllegalArgumentException("amount must be positive");
+        }
+        if (!expiresAt.isAfter(now)) {
+            throw new IllegalArgumentException("expiresAt must be after now");
+        }
+
+        return RemotePayRequestEntity.builder()
+                .requester_user_id(requesterUserId)
+                .source_payment_id(sourcePaymentId)
+                .amount(amount)
+                .description(description)
+                .status(RemotePayStatus.DRAFT)
+                .expires_at(expiresAt)
+                .created_at(now)
+                .updated_at(now)
+                .build();
+    }
 
     // [be] 영은 260527 1005 | payment_id 없이 원격결제 요청 최초 상태를 만드는 보조 생성 경로다.
     // [be] 영은 260528 1040 | B안의 기본 생성은 pendingFromCore이고, 이 경로는 직접 생성 테스트/호환용으로만 남긴다.
@@ -123,6 +153,7 @@ public class RemotePayRequestEntity {
         return RemotePayRequestEntity.builder()
                 .requester_user_id(requesterUserId)
                 .target_user_id(targetUserId)
+                .source_payment_id(payment.getPaymentId())
                 .payment(payment)
                 .amount(payment.getAmount())
                 .description(description)
@@ -131,6 +162,33 @@ public class RemotePayRequestEntity {
                 .created_at(now)
                 .updated_at(now)
                 .build();
+    }
+
+    public void assignTarget(Long requesterUserId, Long targetUserId, LocalDateTime now) {
+        if (requesterUserId == null || targetUserId == null || now == null) {
+            throw new IllegalArgumentException("requesterUserId, targetUserId and now must not be null");
+        }
+        if (!this.requester_user_id.equals(requesterUserId)) {
+            throw new IllegalStateException("only requester can assign remote payment target");
+        }
+        if (requesterUserId.equals(targetUserId)) {
+            throw new IllegalArgumentException("requester and target must be different");
+        }
+        if (this.status != RemotePayStatus.DRAFT) {
+            throw new IllegalStateException("remote payment request target can be assigned only in draft status");
+        }
+        if (this.target_user_id != null && !this.target_user_id.equals(targetUserId)) {
+            throw new IllegalStateException("remote payment request already has another target");
+        }
+        if (this.expires_at != null && !this.expires_at.isAfter(now)) {
+            this.status = RemotePayStatus.EXPIRED;
+            this.updated_at = now;
+            throw new IllegalStateException("remote payment request is expired");
+        }
+
+        this.target_user_id = targetUserId;
+        this.status = RemotePayStatus.PENDING;
+        this.updated_at = now;
     }
 
     public void assignPayment(Long targetUserId, CoreEntity payment, LocalDateTime now) {
@@ -243,6 +301,7 @@ public class RemotePayRequestEntity {
 
     // [be] 영은 260528 1040 | 원격결제 요청의 업무 상태다. B안에서는 payment_id 유무와 별개로 이 상태가 전이 기준이다.
     public enum RemotePayStatus {
+        DRAFT,
         PENDING,
         COMPLETED,
         REJECTED_BY_PAYER,

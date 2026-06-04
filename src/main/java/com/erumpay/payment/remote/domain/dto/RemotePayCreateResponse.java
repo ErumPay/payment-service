@@ -25,6 +25,10 @@ public class RemotePayCreateResponse {
     private Long target_user_id;
     @Schema(description = "연결된 Core payment_orders.payment_id", example = "10001")
     private Long payment_id;
+    @Schema(description = "QR에서 먼저 생성된 원본 payment_orders.payment_id", example = "10001")
+    private Long source_payment_id;
+    @Schema(description = "대리결제자가 실제로 결제할 payment_orders.payment_id", example = "10002")
+    private Long payer_payment_id;
     @Schema(description = "원격결제 금액", example = "10000")
     private Long amount;
     private String description;
@@ -44,6 +48,8 @@ public class RemotePayCreateResponse {
                 .requester_user_id(request.getRequester_user_id())
                 .target_user_id(request.getTarget_user_id())
                 .payment_id(request.getPayment() == null ? null : request.getPayment().getPaymentId())
+                .source_payment_id(request.getSource_payment_id())
+                .payer_payment_id(request.getPayment() == null ? null : request.getPayment().getPaymentId())
                 .amount(request.getAmount())
                 .description(request.getDescription())
                 .status(request.getStatus().name())

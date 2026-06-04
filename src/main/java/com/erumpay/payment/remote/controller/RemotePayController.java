@@ -15,8 +15,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.erumpay.payment.remote.domain.dto.RemotePayCoreCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateResponse;
+import com.erumpay.payment.remote.domain.dto.RemotePayDraftCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayExpireBatchResponse;
+import com.erumpay.payment.remote.domain.dto.RemotePayPaymentConnectRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayRejectRequest;
+import com.erumpay.payment.remote.domain.dto.RemotePayTargetAssignRequest;
 import com.erumpay.payment.remote.service.RemotePayService;
 import com.erumpay.payment.remote.service.RemotePaySseService;
 
@@ -83,6 +86,38 @@ public class RemotePayController {
         log.info("/internal/v1/remote-pay/requests Controller");
 
         return ResponseEntity.ok(remotePayService.createRequestFromCore(userId, request));
+    }
+
+    @PostMapping("/internal/v1/remote-pay/requests/draft")
+    public ResponseEntity<RemotePayCreateResponse> createDraftFromCore(
+            @RequestHeader("X-User-Id") @Positive Long userId,
+            @Valid @RequestBody RemotePayDraftCreateRequest request) {
+        log.info("/internal/v1/remote-pay/requests/draft Controller");
+
+        return ResponseEntity.ok(remotePayService.createDraftFromCore(userId, request));
+    }
+
+    @PostMapping("/api/v1/remote-pay/requests/{request_id}/target")
+    public ResponseEntity<RemotePayCreateResponse> assignTarget(
+            @RequestHeader("X-User-Id") @Positive Long userId,
+            @PathVariable("request_id") @Positive Long request_id,
+            @Valid @RequestBody RemotePayTargetAssignRequest request) {
+        log.info("/api/v1/remote-pay/requests/{}/target Controller", request_id);
+
+        return ResponseEntity.ok(remotePayService.assignTarget(userId, request_id, request));
+    }
+
+    @PostMapping("/internal/v1/remote-pay/requests/{request_id}/payment")
+    public ResponseEntity<RemotePayCreateResponse> connectPaymentFromCore(
+            @RequestHeader("X-User-Id") @Positive Long userId,
+            @PathVariable("request_id") @Positive Long request_id,
+            @Valid @RequestBody RemotePayPaymentConnectRequest request) {
+        log.info("/internal/v1/remote-pay/requests/{}/payment Controller", request_id);
+
+        return ResponseEntity.ok(remotePayService.connectPaymentForPrepare(
+                userId,
+                request_id,
+                request.getPayer_payment_id()));
     }
 
     // [be] 영은 260528 1030 | 원격결제 거절 - 요청받은 사람이 PENDING 상태의 원격결제 요청을 거절한다.

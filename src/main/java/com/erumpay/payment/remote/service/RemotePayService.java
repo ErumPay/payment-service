@@ -19,9 +19,11 @@ import com.erumpay.payment.remote.dao.RemotePayRequestRepository;
 import com.erumpay.payment.remote.domain.dto.RemotePayCoreCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateResponse;
+import com.erumpay.payment.remote.domain.dto.RemotePayDraftCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayExpireBatchResponse;
 import com.erumpay.payment.remote.domain.entity.RemotePayRequestEntity;
 import com.erumpay.payment.remote.domain.entity.RemotePayRequestEntity.RemotePayStatus;
+import com.erumpay.payment.remote.domain.dto.RemotePayTargetAssignRequest;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -80,6 +82,22 @@ public class RemotePayService {
         return response;
     }
 
+    public RemotePayCreateResponse createDraftFromCore(Long requesterUserId, RemotePayDraftCreateRequest request) {
+        log.info("/internal/v1/remote-pay/requests/draft Service");
+
+        if (requesterUserId == null || request == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        CoreEntity sourcePayment = coreRepository.findById(request.getSource_payment_id())
+                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+
+        RemotePayCreateResponse response = transactionTemplate.execute(
+                status -> saveDraftRequestFromCore(requesterUserId, sourcePayment, request.getDescription()));
+        publishRequestUpdated(response.getRequest_id(), "REQUEST_DRAFT_CREATED", response);
+        return response;
+    }
+
     // [be] 영은 260528 1015 | 같은 모듈 내부에서 CoreService가 HTTP 없이 직접 호출할 때 쓰는 진입점이다.
     // [be] 영은 260528 1015 | 반환된 request_id를 Core가 prepare 응답의 remoteRequestId로 내려주면 프론트/알림이 같은 요청을 추적할 수 있다.
     public RemotePayCreateResponse createRequestFromCore(
@@ -112,6 +130,28 @@ public class RemotePayService {
         return RemotePayCreateResponse.fromEntity(request);
     }
 
+    @Transactional
+    public RemotePayCreateResponse assignTarget(Long requesterUserId, Long requestId, RemotePayTargetAssignRequest targetRequest) {
+        log.info("/api/v1/remote-pay/requests/{}/target Service", requestId);
+
+        if (requesterUserId == null || targetRequest == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        remotePayFriendValidator.validate(requesterUserId, targetRequest.getTarget_user_id());
+
+        RemotePayRequestEntity request = getRequestForUpdate(requestId);
+        try {
+            request.assignTarget(requesterUserId, targetRequest.getTarget_user_id(), LocalDateTime.now());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+        }
+
+        RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
+        publishAfterCommit(response.getRequest_id(), "TARGET_ASSIGNED", response);
+        return response;
+    }
+
     // [be] 영은 260527 1020 | 진행 중 요청 목록 조회 - 홈/알림함에서 아직 PENDING인 원격결제 요청만 보여주기 위한 API다.
     // [be] 영은 260527 1020 | 같은 사용자가 요청자/대상자 양쪽 역할을 가질 수 있어 두 컬럼을 모두 조회한다.
     @Transactional(readOnly = true)
@@ -124,7 +164,7 @@ public class RemotePayService {
 
         return remotePayRequestRepository.findRequestsByUserIdAndStatuses(
                 userId,
-                List.of(RemotePayStatus.PENDING))
+                List.of(RemotePayStatus.DRAFT, RemotePayStatus.PENDING))
                 .stream()
                 .map(RemotePayCreateResponse::fromEntity)
                 .toList();
@@ -133,13 +173,27 @@ public class RemotePayService {
     // [be] 영은 260527 1430 | A안에서 쓰던 결제 주문 사후 연결 흐름이다.
     // [be] 영은 260528 1040 | B안에서는 요청 생성 시점에 payment_id를 함께 묶으므로 Core 쪽 전환이 끝나면 제거 대상이다.
     @Transactional
-    public void connectPaymentForPrepare(Long targetUserId, Long requestId, CoreEntity payment) {
+    public RemotePayCreateResponse connectPaymentForPrepare(Long targetUserId, Long requestId, CoreEntity payment) {
         RemotePayRequestEntity request = getRequestForUpdate(requestId);
         try {
             request.assignPayment(targetUserId, payment, LocalDateTime.now());
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new CustomException(ErrorCode.BAD_REQUEST, e);
         }
+
+        RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
+        publishAfterCommit(response.getRequest_id(), "PAYMENT_CONNECTED", response);
+        return response;
+    }
+
+    public RemotePayCreateResponse connectPaymentForPrepare(Long targetUserId, Long requestId, Long payerPaymentId) {
+        if (targetUserId == null || requestId == null || payerPaymentId == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        CoreEntity payment = coreRepository.findById(payerPaymentId)
+                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+        return connectPaymentForPrepare(targetUserId, requestId, payment);
     }
 
     // [be] 영은 260527 1040 | 요청받은 사람은 아직 PENDING인 원격결제 요청을 거절할 수 있다.
@@ -254,6 +308,44 @@ public class RemotePayService {
                     request.getTarget_user_id(),
                     request.getAmount(),
                     normalizeDescription(request.getDescription()),
+                    now.plusMinutes(expiresAfterMinutes),
+                    now);
+        } catch (IllegalArgumentException e) {
+            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+        }
+
+        return RemotePayCreateResponse.fromEntity(remotePayRequestRepository.save(remoteRequest));
+    }
+
+    private RemotePayCreateResponse saveDraftRequestFromCore(
+            Long requesterUserId,
+            CoreEntity sourcePayment,
+            String description) {
+        RemotePayRequestEntity existing = remotePayRequestRepository
+                .findBySourcePaymentIdForUpdate(sourcePayment.getPaymentId())
+                .orElse(null);
+        if (existing != null) {
+            if (!requesterUserId.equals(existing.getRequester_user_id())) {
+                throw new CustomException(ErrorCode.BAD_REQUEST);
+            }
+            return RemotePayCreateResponse.fromEntity(existing);
+        }
+
+        if (sourcePayment.getPaymentId() == null
+                || sourcePayment.getAmount() == null
+                || sourcePayment.getAmount() <= 0
+                || sourcePayment.getChannel_type() != CoreEntity.ChannelType.ONLINE) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        RemotePayRequestEntity remoteRequest;
+        try {
+            remoteRequest = RemotePayRequestEntity.draftFromCore(
+                    requesterUserId,
+                    sourcePayment.getPaymentId(),
+                    sourcePayment.getAmount(),
+                    normalizeDescription(description),
                     now.plusMinutes(expiresAfterMinutes),
                     now);
         } catch (IllegalArgumentException e) {
