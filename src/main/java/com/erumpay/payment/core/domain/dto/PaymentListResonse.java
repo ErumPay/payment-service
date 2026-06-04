@@ -18,7 +18,7 @@ public class PaymentListResonse {
 
     private List<PaymentItem> items;
     private Long page;
-    private Long size;
+    private Long count;
     private boolean hasNext;
 
     @Builder
