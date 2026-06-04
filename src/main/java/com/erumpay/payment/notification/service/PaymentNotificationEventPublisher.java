@@ -27,8 +27,14 @@ public class PaymentNotificationEventPublisher {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
+    @Value("${app.kafka.topics.payment-event:payment.event}")
+    private String paymentTopic;
+
     @Value("${app.kafka.topics.dutch-event:dutch.event}")
     private String dutchTopic;
+
+    @Value("${app.kafka.topics.remote-command:remote.command}")
+    private String remoteCommandTopic;
 
     @Value("${app.kafka.topics.remote-event:remote.event}")
     private String remoteTopic;
@@ -54,6 +60,7 @@ public class PaymentNotificationEventPublisher {
         }
         publishRemote(
                 response,
+                remoteCommandTopic,
                 "REMOTE_REQUESTED",
                 response.getTarget_user_id(),
                 "원격결제 요청이 도착했습니다.",
@@ -66,10 +73,24 @@ public class PaymentNotificationEventPublisher {
         }
         publishRemote(
                 response,
+                remoteCommandTopic,
                 "REMOTE_REJECTED",
                 response.getRequester_user_id(),
                 "원격결제가 거절되었습니다.",
                 "대리결제자가 원격결제 요청을 거절했습니다.");
+    }
+
+    public void publishRemoteApproved(RemotePayCreateResponse response) {
+        if (response == null || response.getRequester_user_id() == null) {
+            return;
+        }
+        publishRemote(
+                response,
+                remoteCommandTopic,
+                "REMOTE_APPROVED",
+                response.getRequester_user_id(),
+                "원격결제 요청이 수락되었습니다.",
+                "대리결제자가 원격결제 요청을 수락했습니다.");
     }
 
     public void publishRemoteCompleted(RemotePayCreateResponse response) {
@@ -78,6 +99,7 @@ public class PaymentNotificationEventPublisher {
         }
         publishRemote(
                 response,
+                remoteTopic,
                 "REMOTE_COMPLETED",
                 response.getRequester_user_id(),
                 "원격결제가 완료되었습니다.",
@@ -86,6 +108,7 @@ public class PaymentNotificationEventPublisher {
 
     public void publishDutchInvited(Long sessionId, Long userId, String orderName) {
         publishDutch(
+                paymentTopic,
                 sessionId,
                 userId,
                 null,
@@ -96,6 +119,7 @@ public class PaymentNotificationEventPublisher {
 
     public void publishDutchConfirmed(Long sessionId, Long userId, String orderName) {
         publishDutch(
+                paymentTopic,
                 sessionId,
                 userId,
                 null,
@@ -106,6 +130,7 @@ public class PaymentNotificationEventPublisher {
 
     public void publishDutchTimeoutWarning1(Long sessionId, Long userId, Long paymentId) {
         publishDutch(
+                paymentTopic,
                 sessionId,
                 userId,
                 paymentId,
@@ -116,6 +141,7 @@ public class PaymentNotificationEventPublisher {
 
     public void publishDutchTimeoutWarning2(Long sessionId, Long userId, Long paymentId) {
         publishDutch(
+                paymentTopic,
                 sessionId,
                 userId,
                 paymentId,
@@ -126,6 +152,7 @@ public class PaymentNotificationEventPublisher {
 
     public void publishDutchCompleted(Long sessionId, Long userId, Long paymentId) {
         publishDutch(
+                dutchTopic,
                 sessionId,
                 userId,
                 paymentId,
@@ -136,6 +163,7 @@ public class PaymentNotificationEventPublisher {
 
     private void publishRemote(
             RemotePayCreateResponse response,
+            String topic,
             String eventType,
             Long userId,
             String title,
@@ -144,7 +172,7 @@ public class PaymentNotificationEventPublisher {
                 ? response.getPayment_id()
                 : response.getPayer_payment_id();
         publish(
-                remoteTopic,
+                topic,
                 "remote:%s:%d:%d".formatted(eventType, response.getRequest_id(), userId),
                 eventType,
                 userId,
@@ -155,6 +183,7 @@ public class PaymentNotificationEventPublisher {
     }
 
     private void publishDutch(
+            String topic,
             Long sessionId,
             Long userId,
             Long paymentId,
@@ -165,7 +194,7 @@ public class PaymentNotificationEventPublisher {
             return;
         }
         publish(
-                dutchTopic,
+                topic,
                 "dutch:%s:%d:%d".formatted(eventType, sessionId, userId),
                 eventType,
                 userId,
@@ -195,7 +224,7 @@ public class PaymentNotificationEventPublisher {
                 .correlationId(correlationId)
                 .build();
 
-        Runnable sendTask = () -> send(topic, eventId, message);
+        Runnable sendTask = () -> send(topic, String.valueOf(userId), message);
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override

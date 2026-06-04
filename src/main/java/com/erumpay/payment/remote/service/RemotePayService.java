@@ -194,6 +194,7 @@ public class RemotePayService {
 
         RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
         publishAfterCommit(response.getRequest_id(), "PAYMENT_CONNECTED", response);
+        notificationEventPublisher.publishRemoteApproved(response);
         return response;
     }
 
