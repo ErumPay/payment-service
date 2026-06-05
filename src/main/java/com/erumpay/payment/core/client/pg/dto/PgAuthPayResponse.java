@@ -17,6 +17,8 @@ public class PgAuthPayResponse {
 
     private Long pgTxnId;
 
+    private Long pgGroupId;
+
     private Long payPaymentId;
 
     private Long merchantId;

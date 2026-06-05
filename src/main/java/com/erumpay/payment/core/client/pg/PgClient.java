@@ -27,6 +27,13 @@ public interface PgClient {
                         @RequestHeader("Idempotency-Key") String idempotencyKey,
                         @RequestBody PgSplitPayRequest request);
 
+        @PostMapping(value = "/internal/v1/pg/payments/split/{pgGroupId}/cancel", consumes = "application/json")
+        PgSplitPayResponse pgSplitPaymentCancelRequest(
+                        @RequestHeader("Authorization") String authorization,
+                        @RequestHeader("Idempotency-Key") String idempotencyKey,
+                        @PathVariable("pgGroupId") Long pgGroupId,
+                        @RequestBody PgPayCancelRequest request);
+
         @PostMapping(value = "/internal/v1/pg/payments/auth-only", consumes = "application/json")
         PgAuthPayResponse pgPaymentAuthOnlyRequest(
                         @RequestHeader("Authorization") String authorization,

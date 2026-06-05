@@ -1,6 +1,7 @@
 package com.erumpay.payment.core.service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -58,6 +59,9 @@ public class CorePgPaymentPersistenceService {
 
         LocalDateTime now = LocalDateTime.now();
         payment.updateStrategyType(strategyType, now);
+        if (pgResponse != null && pgResponse.getPgGroupId() != null) {
+            payment.updatePgGroupId(pgResponse.getPgGroupId(), now);
+        }
         payment.paidStatusUpdatePayment(now);
 
         EventEntity savedEvent = EventEntity.builder()
@@ -92,6 +96,23 @@ public class CorePgPaymentPersistenceService {
     public void markCardCanceled(Long paymentCardId, LocalDateTime canceledAt) {
         CardDetailEntity cardDetail = findCardDetailOrThrow(paymentCardId);
         cardDetail.markCanceled(canceledAt);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markCardsCanceled(List<Long> paymentCardIds, LocalDateTime canceledAt) {
+        if (paymentCardIds == null || paymentCardIds.isEmpty() || canceledAt == null) {
+            throw new CustomException(ErrorCode.CANCELED_CARD_INVALID);
+        }
+
+        List<Long> distinctPaymentCardIds = paymentCardIds.stream()
+                .distinct()
+                .toList();
+        List<CardDetailEntity> cardDetails = cardDetailRepository.findAllById(distinctPaymentCardIds);
+        if (cardDetails.size() != distinctPaymentCardIds.size()) {
+            throw new CustomException(ErrorCode.CANCELED_CARD_INVALID);
+        }
+
+        cardDetails.forEach(cardDetail -> cardDetail.markCanceled(canceledAt));
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -163,7 +184,7 @@ public class CorePgPaymentPersistenceService {
                 || paidCard.getMaskedNumber() == null
                 || paidCard.getCardName() == null
                 || paidCard.getPaidAmount() == null
-                || paidCard.getDiscountAmount() == null
+                || paidCard.getTotalBenefitAmount() == null
                 || paidCard.getPaidAt() == null) {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
@@ -176,7 +197,7 @@ public class CorePgPaymentPersistenceService {
                 .masked_number(paidCard.getMaskedNumber())
                 .card_name(paidCard.getCardName())
                 .paid_amount(paidCard.getPaidAmount())
-                .discount_amount(paidCard.getDiscountAmount())
+                .discount_amount(paidCard.getTotalBenefitAmount())
                 .benefit_desc(paidCard.getBenefitDesc())
                 .paid_at(paidCard.getPaidAt())
                 .card_status(CardStatus.PAID)

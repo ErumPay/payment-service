@@ -86,6 +86,9 @@ public class CoreEntity {
     @Column(name = "canceled_at")
     private LocalDateTime canceledAt;
 
+    @Column(name = "pg_group_id")
+    private Long pgGroupId;
+
     // [be] 다윤 260526 결제 요청 status 업데이트
     public void preparePayment(
             String idempotencyKey,
@@ -137,6 +140,14 @@ public class CoreEntity {
             throw new IllegalArgumentException("strategyType and updatedAt must not be null");
         }
         this.strategy_type = StrategyType.valueOf(strategyType.trim().toUpperCase(Locale.ROOT));
+        this.updatedAt = updatedAt;
+    }
+
+    public void updatePgGroupId(Long pgGroupId, LocalDateTime updatedAt) {
+        if (pgGroupId == null || updatedAt == null) {
+            throw new IllegalArgumentException("pgGroupId and updatedAt must not be null");
+        }
+        this.pgGroupId = pgGroupId;
         this.updatedAt = updatedAt;
     }
 
