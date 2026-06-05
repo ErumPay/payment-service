@@ -15,8 +15,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.erumpay.payment.remote.domain.dto.RemotePayCoreCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateResponse;
+import com.erumpay.payment.remote.domain.dto.RemotePayDraftCreateRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayExpireBatchResponse;
+import com.erumpay.payment.remote.domain.dto.RemotePayPaymentConnectRequest;
 import com.erumpay.payment.remote.domain.dto.RemotePayRejectRequest;
+import com.erumpay.payment.remote.domain.dto.RemotePayTargetAssignRequest;
 import com.erumpay.payment.remote.service.RemotePayService;
 import com.erumpay.payment.remote.service.RemotePaySseService;
 
@@ -44,7 +47,7 @@ public class RemotePayController {
         return ResponseEntity.ok(remotePayService.getRequest(userId, request_id));
     }
 
-    // [be] 영은 260527 1020 | 원격결제 진행 목록 조회 - 사용자가 요청자 또는 대상자인 PENDING 요청을 홈/알림함에 노출한다.
+    // [be] 영은 260527 1020 | 원격결제 진행 목록 조회 - 사용자가 요청자 또는 대상자인 DRAFT/PENDING 요청을 홈/알림함에 노출한다.
     @GetMapping("/api/v1/remote-pay/requests/active")
     public ResponseEntity<List<RemotePayCreateResponse>> getActiveRequests(
             @RequestHeader("X-User-Id") @Positive Long userId) {
@@ -63,8 +66,8 @@ public class RemotePayController {
         return remotePaySseService.subscribe(request_id, userId);
     }
 
-    // [be] 영은 260527 1000 | 원격결제 요청 생성 - 초기 테스트/직접 생성용 공개 API다.
-    // [be] 영은 260528 1040 | 최종 B안에서는 프론트가 Core /payment/prepare로 진입하고, Core가 내부 API로 request_id를 발급받는다.
+    // [be] 영은 260527 1000 | 원격결제 요청 생성 - targetUserId를 이미 알고 있는 초기 테스트/직접 생성용 공개 API다.
+    // [be] 영은 260605 1530 | 현재 모바일 기본 흐름은 Core가 draft를 만들고, 이후 target 지정 API로 대리결제자를 연결한다.
     @PostMapping("/api/v1/remote-pay/requests")
     public ResponseEntity<RemotePayCreateResponse> createRequest(
             @RequestHeader("X-User-Id") @Positive Long userId,
@@ -74,8 +77,8 @@ public class RemotePayController {
         return ResponseEntity.ok(remotePayService.createRequest(userId, request));
     }
 
-    // [be] 영은 260528 1010 | Core /payment/prepare가 REMOTE 선택 시 호출하는 내부 원격결제 요청 생성 API다.
-    // [be] 영은 260528 1010 | 프론트는 이 API를 직접 호출하지 않고, Core가 payment_id를 전달해 request_id를 발급받는다.
+    // [be] 영은 260528 1010 | targetUserId를 이미 알고 있을 때 Core가 호출하는 기존 내부 생성 API다.
+    // [be] 영은 260605 1530 | target을 나중에 고르는 화면에서는 /draft를 먼저 호출한다.
     @PostMapping("/internal/v1/remote-pay/requests")
     public ResponseEntity<RemotePayCreateResponse> createRequestFromCore(
             @RequestHeader("X-User-Id") @Positive Long userId,
@@ -83,6 +86,42 @@ public class RemotePayController {
         log.info("/internal/v1/remote-pay/requests Controller");
 
         return ResponseEntity.ok(remotePayService.createRequestFromCore(userId, request));
+    }
+
+    // [be] 영은 260605 1530 | Core /payment/prepare REMOTE 시점에 호출한다.
+    // [be] 영은 260605 1530 | 아직 대리결제자 선택 전이므로 DRAFT 상태 request_id만 먼저 발급한다.
+    @PostMapping("/internal/v1/remote-pay/requests/draft")
+    public ResponseEntity<RemotePayCreateResponse> createDraftFromCore(
+            @RequestHeader("X-User-Id") @Positive Long userId,
+            @Valid @RequestBody RemotePayDraftCreateRequest request) {
+        log.info("/internal/v1/remote-pay/requests/draft Controller");
+
+        return ResponseEntity.ok(remotePayService.createDraftFromCore(userId, request));
+    }
+
+    // [be] 영은 260605 1530 | 요청자가 친구 선택을 완료하면 DRAFT 요청에 target_user_id를 연결하고 PENDING으로 전환한다.
+    @PostMapping("/api/v1/remote-pay/requests/{request_id}/target")
+    public ResponseEntity<RemotePayCreateResponse> assignTarget(
+            @RequestHeader("X-User-Id") @Positive Long userId,
+            @PathVariable("request_id") @Positive Long request_id,
+            @Valid @RequestBody RemotePayTargetAssignRequest request) {
+        log.info("/api/v1/remote-pay/requests/{}/target Controller", request_id);
+
+        return ResponseEntity.ok(remotePayService.assignTarget(userId, request_id, request));
+    }
+
+    // [be] 영은 260605 1530 | 대리결제자 Core /payment/prepare 이후 생성된 payer payment_id를 원격결제 요청에 연결한다.
+    @PostMapping("/internal/v1/remote-pay/requests/{request_id}/payment")
+    public ResponseEntity<RemotePayCreateResponse> connectPaymentFromCore(
+            @RequestHeader("X-User-Id") @Positive Long userId,
+            @PathVariable("request_id") @Positive Long request_id,
+            @Valid @RequestBody RemotePayPaymentConnectRequest request) {
+        log.info("/internal/v1/remote-pay/requests/{}/payment Controller", request_id);
+
+        return ResponseEntity.ok(remotePayService.connectPaymentForPrepare(
+                userId,
+                request_id,
+                request.getPayer_payment_id()));
     }
 
     // [be] 영은 260528 1030 | 원격결제 거절 - 요청받은 사람이 PENDING 상태의 원격결제 요청을 거절한다.

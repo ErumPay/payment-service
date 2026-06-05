@@ -42,7 +42,7 @@ public interface RemotePayRequestRepository extends JpaRepository<RemotePayReque
             @Param("requestId") Long requestId,
             @Param("userId") Long userId);
 
-    // [be] 영은 260528 1330 | Core 재시도 시 같은 payment_id에 원격결제 요청이 중복 생성되지 않도록 기존 매핑을 잠금 조회한다.
+    // [be] 영은 260528 1330 | 대리결제자 payment_id 기준으로 원격결제 요청을 찾아 중복 연결/완료 처리를 막는다.
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select r
@@ -51,6 +51,16 @@ public interface RemotePayRequestRepository extends JpaRepository<RemotePayReque
             where r.payment.paymentId = :paymentId
             """)
     Optional<RemotePayRequestEntity> findByPaymentIdForUpdate(@Param("paymentId") Long paymentId);
+
+    // [be] 영은 260605 1530 | 요청자가 QR에서 얻은 원본 payment_id 기준으로 DRAFT 요청을 재사용할 때 잠금 조회한다.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select r
+            from RemotePayRequestEntity r
+            left join fetch r.payment
+            where r.source_payment_id = :sourcePaymentId
+            """)
+    Optional<RemotePayRequestEntity> findBySourcePaymentIdForUpdate(@Param("sourcePaymentId") Long sourcePaymentId);
 
     // [be] 영은 260527 1020 | 요청자/대상자 양쪽 홈 화면에서 진행 중 원격결제 요청을 조회한다.
     @Query("""
@@ -83,11 +93,11 @@ public interface RemotePayRequestRepository extends JpaRepository<RemotePayReque
     @Query("""
             select r.request_id
             from RemotePayRequestEntity r
-            where r.status = :status
+            where r.status in :statuses
               and r.expires_at <= :now
             order by r.expires_at asc
             """)
     List<Long> findExpiredTargetIds(
-            @Param("status") RemotePayStatus status,
+            @Param("statuses") List<RemotePayStatus> statuses,
             @Param("now") LocalDateTime now);
 }

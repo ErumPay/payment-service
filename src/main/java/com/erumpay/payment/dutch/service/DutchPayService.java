@@ -50,6 +50,7 @@ import com.erumpay.payment.dutch.domain.entity.DutchPayParticipantEntity.Partici
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity.DutchPayStatus;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity.SplitMethod;
+import com.erumpay.payment.notification.service.PaymentNotificationEventPublisher;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -72,6 +73,7 @@ public class DutchPayService {
     private final DutchPayParticipantRepository dutchPayParticipantRepository;
     private final CoreRepository coreRepository;
     private final DutchPaySseService dutchPaySseService;
+    private final PaymentNotificationEventPublisher notificationEventPublisher;
 
     // [be] 영은 260523 1120 | core에서 생성한 대표자 payment_id를 받아 더치페이 세션과 대표자 참여자 row를 만든다
     @Transactional
@@ -284,6 +286,10 @@ public class DutchPayService {
             throw toParticipantPaymentException(e);
         }
 
+        getParticipants(sessionId).forEach(participant -> notificationEventPublisher.publishDutchCompleted(
+                sessionId,
+                participant.getUser_id(),
+                request.getPayment_id()));
         return publishAndReturn(sessionId, "SESSION_COMPLETED");
     }
 
@@ -313,6 +319,10 @@ public class DutchPayService {
             try {
                 session.markWarning2Sent(now);
                 publishSessionUpdated(session.getSession_id(), "TIMEOUT_WARNING_2");
+                notificationEventPublisher.publishDutchTimeoutWarning2(
+                        session.getSession_id(),
+                        session.getHost_user_id(),
+                        session.getHost_auth_payment_id());
                 warning2Count++;
             } catch (RuntimeException e) {
                 failedSessionIds.add(session.getSession_id());
@@ -328,6 +338,10 @@ public class DutchPayService {
             try {
                 session.markWarning1Sent(now);
                 publishSessionUpdated(session.getSession_id(), "TIMEOUT_WARNING_1");
+                notificationEventPublisher.publishDutchTimeoutWarning1(
+                        session.getSession_id(),
+                        session.getHost_user_id(),
+                        session.getHost_auth_payment_id());
                 warning1Count++;
             } catch (RuntimeException e) {
                 failedSessionIds.add(session.getSession_id());
@@ -408,6 +422,7 @@ public class DutchPayService {
 
             dutchPayParticipantRepository.save(
                     DutchPayParticipantEntity.invited(session, inviteeUserId, null, now));
+            notificationEventPublisher.publishDutchInvited(sessionId, inviteeUserId, session.getOrder_name());
         }
 
         return publishAndReturn(sessionId, "PARTICIPANTS_INVITED");
@@ -491,6 +506,12 @@ public class DutchPayService {
         }
 
         participants.forEach(participant -> participant.confirm(now));
+        participants.stream()
+                .filter(participant -> !participant.getUser_id().equals(session.getHost_user_id()))
+                .forEach(participant -> notificationEventPublisher.publishDutchConfirmed(
+                        sessionId,
+                        participant.getUser_id(),
+                        session.getOrder_name()));
 
         if (request != null && request.getSplit_method() != null && !request.getSplit_method().isBlank()) {
             SplitMethod splitMethod = parseSplitMethod(request.getSplit_method());
