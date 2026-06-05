@@ -48,6 +48,7 @@ import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
 import com.erumpay.payment.core.domain.dto.PrepareRequest;
 import com.erumpay.payment.core.domain.dto.PrepareResponse;
 import com.erumpay.payment.core.domain.dto.RemoteMemberPrepareRequest;
+import com.erumpay.payment.core.domain.dto.UserWithdrawalResponse;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity.CardStatus;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
@@ -85,6 +86,11 @@ public class CoreService {
     private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
     private static final Duration RECOMMENDATION_CACHE_TTL = Duration.ofMinutes(30);
     private static final ZoneId PAYMENT_HISTORY_BUSINESS_ZONE = ZoneId.of("Asia/Seoul");
+    private static final List<CoreEntity.PaymentStatus> WITHDRAWAL_BLOCKING_STATUSES = List.of(
+            CoreEntity.PaymentStatus.PAY_PENDING,
+            CoreEntity.PaymentStatus.PG_PENDING,
+            CoreEntity.PaymentStatus.CANCEL_REQUESTED,
+            CoreEntity.PaymentStatus.AUTHORIZED);
     private static final List<CoreEntity.PaymentStatus> PAYMENT_HISTORY_STATUSES = List.of(
             CoreEntity.PaymentStatus.CANCEL_REQUESTED,
             CoreEntity.PaymentStatus.PAID,
@@ -389,6 +395,29 @@ public class CoreService {
         List<CardDetailEntity> cardDetails = cardDetailRepository.findAllByPaymentId(paymentId);
 
         return toPaymentDetailResponse(payment, cardDetails);
+    }
+
+    // [be] 다윤 260605 20:00 | 사용자 미결제건 조회
+    @Transactional(readOnly = true)
+    public UserWithdrawalResponse getWithdrawalValidate(Long userId) {
+        if (userId == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        long unpaidPaymentCount = coreRepository.countByUserIdAndPaymentStatuses(
+                userId,
+                WITHDRAWAL_BLOCKING_STATUSES);
+        boolean possible = unpaidPaymentCount == 0;
+
+        return UserWithdrawalResponse.builder()
+                .possibility(possible)
+                .userId(userId)
+                .hasUnpaidPayments(!possible)
+                .unpaidPaymentCount(unpaidPaymentCount)
+                .message(possible
+                        ? "탈퇴 가능합니다."
+                        : "미결제 또는 처리 중인 결제 건이 있어 탈퇴할 수 없습니다.")
+                .build();
     }
 
     private Pageable buildPaymentPageable(int page, int size) {

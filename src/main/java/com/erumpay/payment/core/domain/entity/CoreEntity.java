@@ -11,6 +11,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -18,7 +19,11 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "payment_orders")
+@Table(
+        name = "payment_orders",
+        indexes = @Index(
+                name = "idx_payment_orders_user_payment_status",
+                columnList = "user_id, payment_status"))
 @Builder
 @Getter
 @AllArgsConstructor
