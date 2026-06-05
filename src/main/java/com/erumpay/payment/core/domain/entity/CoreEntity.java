@@ -151,6 +151,19 @@ public class CoreEntity {
         this.updatedAt = updatedAt;
     }
 
+    // [be] 다윤 260605 20:00 | 원격결제 아이디 저장
+    public void connectRemoteRequest(Long remoteRequestId, LocalDateTime updatedAt) {
+        if (remoteRequestId == null || updatedAt == null) {
+            throw new IllegalArgumentException("remoteRequestId and updatedAt must not be null");
+        }
+        if (this.remote_request_id != null && !this.remote_request_id.equals(remoteRequestId)) {
+            throw new IllegalStateException("Order is already connected to another remote request");
+        }
+
+        this.remote_request_id = remoteRequestId;
+        this.updatedAt = updatedAt;
+    }
+
     // [be] 다윤 260526 실결제 성공 status 업데이트
     public void paidStatusUpdatePayment(LocalDateTime paidAt) {
         if (paidAt == null) {

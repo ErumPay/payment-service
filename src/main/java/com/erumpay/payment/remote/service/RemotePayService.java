@@ -257,14 +257,48 @@ public class RemotePayService {
         }
 
         RemotePayRequestEntity request = getRequestForPayment(payment);
+        LocalDateTime now = LocalDateTime.now();
         try {
-        request.complete(payment, LocalDateTime.now());
+            request.complete(payment, now);
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new CustomException(ErrorCode.BAD_REQUEST, e);
         }
+        completeSourcePaymentIfNeeded(request, payment, now);
         RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
         publishAfterCommit(request.getRequest_id(), "PAYMENT_COMPLETED", response);
         notificationEventPublisher.publishRemoteCompleted(response);
+    }
+
+    private void completeSourcePaymentIfNeeded(
+            RemotePayRequestEntity request,
+            CoreEntity payerPayment,
+            LocalDateTime completedAt) {
+        Long sourcePaymentId = request.getSource_payment_id();
+        if (sourcePaymentId == null
+                || payerPayment == null
+                || sourcePaymentId.equals(payerPayment.getPaymentId())) {
+            return;
+        }
+
+        CoreEntity sourcePayment = coreRepository.findById(sourcePaymentId).orElse(null);
+        if (sourcePayment == null) {
+            log.warn("RemotePay source payment not found. requestId={}, sourcePaymentId={}",
+                    request.getRequest_id(),
+                    sourcePaymentId);
+            return;
+        }
+        if (sourcePayment.getPayment_status() == CoreEntity.PaymentStatus.PAID) {
+            return;
+        }
+        if (sourcePayment.getPayment_status() != CoreEntity.PaymentStatus.PAY_PENDING) {
+            log.warn("RemotePay source payment status is not payable. requestId={}, sourcePaymentId={}, status={}",
+                    request.getRequest_id(),
+                    sourcePaymentId,
+                    sourcePayment.getPayment_status());
+            return;
+        }
+
+        sourcePayment.paidStatusUpdatePayment(completedAt);
     }
 
     // [be] 영은 260527 1440 | Core가 PG 요청 직전에 호출해 취소/거절/만료된 원격결제가 결제되지 않도록 막는다.

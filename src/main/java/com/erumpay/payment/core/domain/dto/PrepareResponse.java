@@ -29,7 +29,9 @@ public class PrepareResponse {
     private String dutchRole;
     @Schema(description = "더치 세션 ID", example = "3001")
     private Long dutchSessionId;
-    @Schema(description = "결제 금액", example = "15000")
+    @Schema(description = "원격 결제 ID", example = "3001")
+    private Long remoteRequestId;
+    @Schema(description = "결제 금액", example = "12000")
     private Long amount;
 
 }
