@@ -100,4 +100,15 @@ public interface CoreRepository extends JpaRepository<CoreEntity, Long> {
 
                 Long getPaidAmount();
         }
+
+        // [be] 다윤 260605 20:00 | 사용자 회원 탈퇴 차단 결제건 조회
+        @Query("""
+                        select count(o)
+                        from CoreEntity o
+                        where o.userId = :userId
+                          and o.payment_status in :paymentStatuses
+                        """)
+        long countByUserIdAndPaymentStatuses(
+                        @Param("userId") Long userId,
+                        @Param("paymentStatuses") List<CoreEntity.PaymentStatus> paymentStatuses);
 }
