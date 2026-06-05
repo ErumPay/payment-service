@@ -22,6 +22,8 @@ import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
 import com.erumpay.payment.core.client.pg.dto.PgPayCancelRequest;
+import com.erumpay.payment.core.client.pg.dto.PgSplitPayRequest;
+import com.erumpay.payment.core.client.pg.dto.PgSplitPayResponse;
 import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
 import com.erumpay.payment.core.dao.EventRepository;
 import com.erumpay.payment.core.domain.dto.CoreSseEventType;
@@ -52,6 +54,7 @@ public class CorePgPaymentService {
 
     private final CoreSseService coreSseService;
     private static final String PG_STATUS_APPROVED = "APPROVED";
+    private static final String PG_STATUS_CAPTURED = "CAPTURED";
     private static final String PG_STATUS_REJECTED = "REJECTED";
     private static final String PG_STATUS_FAILED = "FAILED";
     private static final String PG_STATUS_VOIDED = "VOIDED";
@@ -119,6 +122,10 @@ public class CorePgPaymentService {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
 
+        if (!useAuthOnly && request.getCards().size() > 1) {
+            return requestPgSplitPayment(payment, request, billingKeys, savedIdempotencyKey);
+        }
+
         List<ApprovedCardPayment> approvedPayments = new ArrayList<>();
 
         for (int i = 0; i < request.getCards().size(); i++) {
@@ -158,6 +165,135 @@ public class CorePgPaymentService {
         }
 
         return approvedPayments;
+    }
+
+    private List<ApprovedCardPayment> requestPgSplitPayment(
+            CoreEntity payment,
+            PinAndPayRequest request,
+            Map<Long, CardBillingKeyResponse> billingKeys,
+            String savedIdempotencyKey) {
+        List<PinAndPayRequest.CardPortion> cards = request.getCards();
+        List<CardBillingKeyResponse> orderedBillingKeys = cards.stream()
+                .map(card -> findBillingKeyOrThrow(payment, card, billingKeys))
+                .toList();
+        PgSplitPayRequest pgSplitRequest = buildPgSplitPayRequest(payment, cards, orderedBillingKeys);
+
+        PgSplitPayResponse pgResponse;
+        try {
+            pgResponse = pgClient.pgSplitPaymentRequest(
+                    pgAuthorization,
+                    savedIdempotencyKey,
+                    pgSplitRequest);
+            log.info("pg split payment success. paymentId={}, cardCount={}, groupId={}, status={}, itemCount={}",
+                    payment.getPaymentId(),
+                    cards.size(),
+                    pgResponse == null ? null : pgResponse.getPgGroupId(),
+                    pgResponse == null ? null : pgResponse.getStatus(),
+                    pgResponse == null || pgResponse.getItems() == null ? 0 : pgResponse.getItems().size());
+        } catch (FeignException e) {
+            log.error("pg split feign error. status={}, body={}", e.status(), e.contentUTF8());
+            if (e.status() >= 400 && e.status() < 500) {
+                throw new CustomException(ErrorCode.PG_PAYMENT_REJECTED, e);
+            }
+            throw new CustomException(ErrorCode.PG_PAYMENT_FAILED, e);
+        }
+
+        List<ApprovedCardPayment> approvedPayments = new ArrayList<>();
+        if (pgResponse == null || pgResponse.getStatus() == null || pgResponse.getItems() == null) {
+            failPaymentAfterPgFailure(
+                    payment,
+                    toPgAuthPayResponse(pgResponse),
+                    approvedPayments,
+                    savedIdempotencyKey,
+                    new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR));
+        }
+
+        if (!PG_STATUS_APPROVED.equalsIgnoreCase(pgResponse.getStatus())) {
+            ErrorCode errorCode = resolvePgFailureErrorCode(pgResponse.getStatus());
+            failPaymentAfterPgFailure(
+                    payment,
+                    toPgAuthPayResponse(pgResponse),
+                    approvedPayments,
+                    savedIdempotencyKey,
+                    new CustomException(errorCode));
+        }
+
+        for (int i = 0; i < cards.size(); i++) {
+            PinAndPayRequest.CardPortion card = cards.get(i);
+            PgSplitPayResponse.Item splitItem = findCapturedSplitItem(pgResponse.getItems(), i + 1);
+            PgAuthPayResponse cardPgResponse = toPgAuthPayResponse(splitItem);
+
+            if (cardPgResponse == null || cardPgResponse.getStatus() == null) {
+                failPaymentAfterPgFailure(
+                        payment,
+                        cardPgResponse,
+                        approvedPayments,
+                        savedIdempotencyKey,
+                        new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR));
+            }
+
+            String pgStatus = cardPgResponse.getStatus();
+            if (PG_STATUS_CAPTURED.equalsIgnoreCase(pgStatus)) {
+                approvedPayments.add(new ApprovedCardPayment(card, orderedBillingKeys.get(i), cardPgResponse));
+                continue;
+            }
+
+            ErrorCode errorCode = resolvePgFailureErrorCode(pgStatus);
+            failPaymentAfterPgFailure(
+                    payment,
+                    cardPgResponse,
+                    approvedPayments,
+                    savedIdempotencyKey,
+                    new CustomException(errorCode));
+        }
+
+        return approvedPayments;
+    }
+
+    private PgSplitPayResponse.Item findCapturedSplitItem(List<PgSplitPayResponse.Item> items, int splitSeq) {
+        return items.stream()
+                .filter(item -> item != null && item.getSplitSeq() != null && item.getSplitSeq() == splitSeq)
+                .filter(item -> PG_STATUS_CAPTURED.equalsIgnoreCase(item.getStatus()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private PgAuthPayResponse toPgAuthPayResponse(PgSplitPayResponse splitResponse) {
+        if (splitResponse == null) {
+            return null;
+        }
+
+        return PgAuthPayResponse.builder()
+                .payPaymentId(splitResponse.getPayPaymentId())
+                .merchantId(splitResponse.getMerchantId())
+                .status(splitResponse.getStatus())
+                .amount(splitResponse.getTotalAmount())
+                .failureCode(splitResponse.getFailureCode())
+                .failureMessage(splitResponse.getFailureMessage())
+                .processedAt(splitResponse.getUpdatedAt())
+                .build();
+    }
+
+    private PgAuthPayResponse toPgAuthPayResponse(PgSplitPayResponse.Item splitItem) {
+        if (splitItem == null) {
+            return null;
+        }
+
+        return PgAuthPayResponse.builder()
+                .pgTxnId(splitItem.getPgTxnId())
+                .payPaymentId(splitItem.getPayPaymentId())
+                .merchantId(splitItem.getMerchantId())
+                .txnType(splitItem.getTxnType())
+                .status(splitItem.getStatus())
+                .amount(splitItem.getAmount())
+                .pgApprovalNumber(splitItem.getPgApprovalNumber())
+                .cardApprovalNumber(splitItem.getCardApprovalNumber())
+                .rejectReason(splitItem.getRejectReason())
+                .failureCode(splitItem.getFailureCode())
+                .failureMessage(splitItem.getFailureMessage())
+                .approvedAt(splitItem.getApprovedAt())
+                .processedAt(splitItem.getProcessedAt())
+                .build();
     }
 
     private ErrorCode resolvePgFailureErrorCode(String pgStatus) {
@@ -347,6 +483,31 @@ public class CorePgPaymentService {
                 .billingKey(billingKey.getBillingKey())
                 .originalAmount(payment.getAmount())
                 .approvedAmount(card.getAmount())
+                .build();
+    }
+
+    private PgSplitPayRequest buildPgSplitPayRequest(
+            CoreEntity payment,
+            List<PinAndPayRequest.CardPortion> cards,
+            List<CardBillingKeyResponse> billingKeys) {
+        List<PgSplitPayRequest.Payment> splitPayments = new ArrayList<>();
+        for (int i = 0; i < cards.size(); i++) {
+            PinAndPayRequest.CardPortion card = cards.get(i);
+            CardBillingKeyResponse billingKey = billingKeys.get(i);
+
+            splitPayments.add(PgSplitPayRequest.Payment.builder()
+                    .splitSeq(i + 1)
+                    .billingKey(billingKey.getBillingKey())
+                    .originalAmount(card.getAmount())
+                    .approvedAmount(card.getAmount())
+                    .build());
+        }
+
+        return PgSplitPayRequest.builder()
+                .payPaymentId(payment.getPaymentId())
+                .merchantId(payment.getMerchant_id())
+                .totalAmount(payment.getAmount())
+                .payments(splitPayments)
                 .build();
     }
 
