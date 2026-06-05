@@ -191,11 +191,13 @@ public class CorePgPaymentService {
                     pgResponse == null ? null : pgResponse.getStatus(),
                     pgResponse == null || pgResponse.getItems() == null ? 0 : pgResponse.getItems().size());
         } catch (FeignException e) {
-            log.error("pg split feign error. status={}, body={}", e.status(), e.contentUTF8());
+            log.error("pg split feign error. status={}, body={}",
+                    e.status(),
+                    trimForLog(maskSensitive(e.contentUTF8())));
             if (e.status() >= 400 && e.status() < 500) {
-                throw new CustomException(ErrorCode.PG_PAYMENT_REJECTED, e);
+                return failPaymentAfterPgFailure(payment, ErrorCode.PG_PAYMENT_REJECTED, e);
             }
-            throw new CustomException(ErrorCode.PG_PAYMENT_FAILED, e);
+            return failPaymentAfterPgFailure(payment, ErrorCode.PG_PAYMENT_FAILED, e);
         }
 
         List<ApprovedCardPayment> approvedPayments = new ArrayList<>();
@@ -317,7 +319,19 @@ public class CorePgPaymentService {
         return savedIdempotencyKey + "-card-" + (index + 1) + "-" + card.getCardId();
     }
 
-    private void failPaymentAfterPgFailure(
+    private <T> T failPaymentAfterPgFailure(
+            CoreEntity payment,
+            ErrorCode errorCode,
+            FeignException exception) {
+        return failPaymentAfterPgFailure(
+                payment,
+                null,
+                List.of(),
+                null,
+                new CustomException(errorCode, exception));
+    }
+
+    private <T> T failPaymentAfterPgFailure(
             CoreEntity payment,
             PgAuthPayResponse pgResponse,
             List<ApprovedCardPayment> approvedPayments,
@@ -464,7 +478,9 @@ public class CorePgPaymentService {
                     pgResponse == null ? null : pgResponse.getTxnType());
             return pgResponse;
         } catch (FeignException e) {
-            log.error("pg feign error. status={}, body={}", e.status(), e.contentUTF8());
+            log.error("pg feign error. status={}, body={}",
+                    e.status(),
+                    trimForLog(maskSensitive(e.contentUTF8())));
             if (e.status() >= 400 && e.status() < 500) {
                 throw new CustomException(ErrorCode.PG_PAYMENT_REJECTED, e);
             }
@@ -673,6 +689,17 @@ public class CorePgPaymentService {
 
         int maxLen = 500;
         return body.length() <= maxLen ? body : body.substring(0, maxLen) + "...";
+    }
+
+    private String maskSensitive(String body) {
+        if (body == null || body.isBlank()) {
+            return "";
+        }
+
+        return body.replaceAll(
+                "(?i)((?:cardNumber|cardNo|pan|accountNumber|accountNo|acctNo|billingKey|token)\"?\\s*[:=]\\s*\"?)[^\",}\\s]+",
+                "$1[MASKED]")
+                .replaceAll("(?<!\\d)(?:\\d[ -]?){13,19}(?!\\d)", "[MASKED_PAN]");
     }
 
     private PaidCardRequest buildPaidCardRequest(
