@@ -129,6 +129,7 @@ public class CoreValidationService {
                 .paymentIntent(payment.getPayment_intent() == null ? null : payment.getPayment_intent().name())
                 .dutchRole(payment.getDutch_role() == null ? null : payment.getDutch_role().name())
                 .dutchSessionId(payment.getDutch_session_id())
+                .remoteRequestId(payment.getRemote_request_id())
                 .amount(payment.getAmount())
                 .build();
     }

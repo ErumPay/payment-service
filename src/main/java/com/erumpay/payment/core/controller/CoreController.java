@@ -9,6 +9,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.erumpay.payment.core.domain.dto.PrepareRequest;
 import com.erumpay.payment.core.domain.dto.PrepareResponse;
+import com.erumpay.payment.core.domain.dto.RemoteMemberPrepareRequest;
 import com.erumpay.payment.core.domain.dto.UserWithdrawalResponse;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
@@ -84,6 +85,19 @@ public class CoreController {
         log.info("/payment/prepare-host Controller");
 
         return coreService.prepareHost(userId, idempotencyKey, request);
+    }
+
+    // [be] 다윤 260605 18:00 | 대리자 결제 요청
+    @PostMapping("/prepare-proxy")
+    @Operation(summary = "대리자 결제 생성 요청", description = "원격결제 대리자의 결제 생성을 요청한다.")
+    public ResponseEntity<PrepareResponse> prepareDeputy(
+            @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
+            @Parameter(description = "멱등성 키", required = true) @RequestHeader("Idempotency-Key") String idempotencyKey,
+            @Valid @RequestBody RemoteMemberPrepareRequest request) {
+
+        log.info("/payment/prepare-proxy Controller");
+
+        return coreService.prepareProxy(userId, idempotencyKey, request);
     }
 
     // [be] 다윤 260526 결제 SSE 연결

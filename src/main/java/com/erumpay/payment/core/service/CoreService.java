@@ -47,6 +47,7 @@ import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
 import com.erumpay.payment.core.domain.dto.PrepareRequest;
 import com.erumpay.payment.core.domain.dto.PrepareResponse;
+import com.erumpay.payment.core.domain.dto.RemoteMemberPrepareRequest;
 import com.erumpay.payment.core.domain.dto.UserWithdrawalResponse;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity.CardStatus;
@@ -58,6 +59,8 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRequest;
 import com.erumpay.payment.dutch.service.DutchPayService;
 import com.erumpay.payment.qr.service.QrService;
+import com.erumpay.payment.remote.domain.dto.RemotePayCreateResponse;
+import com.erumpay.payment.remote.domain.dto.RemotePayDraftCreateRequest;
 import com.erumpay.payment.remote.service.RemotePayService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -137,6 +140,7 @@ public class CoreService {
         applyPrepareState(payment, normalizedIdempotencyKey, userId, paymentType, now);
         savePaymentWithDuplicateGuard(payment);
         createDutchHostSessionIfNeeded(request.getPaymentId(), userId, payment, paymentType);
+        createRemoteDraftIfNeeded(userId, payment, paymentType, now);
 
         return finalizePrepare(payment, userId);
     }
@@ -176,6 +180,41 @@ public class CoreService {
                 () -> validateDutchHostFinalPayment(userId, request),
                 payment -> {
                 });
+    }
+
+    // [be] 다윤 260605 20:00 | 결제 요청 시작 - 원격결제 대리자
+    public ResponseEntity<PrepareResponse> prepareProxy(Long userId, String idempotencyKey,
+            RemoteMemberPrepareRequest request) {
+
+        String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
+        Optional<ResponseEntity<PrepareResponse>> idempotentResponse = findReplayedPrepareResponse(
+                userId,
+                normalizedIdempotencyKey);
+        if (idempotentResponse.isPresent()) {
+            return idempotentResponse.get();
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        DutchPaymentSaveOutcome saveOutcome = saveRemoteDeputyPaymentWithIdempotencyGuard(
+                userId,
+                normalizedIdempotencyKey,
+                request,
+                now);
+        if (saveOutcome.hasReplayedResponse()) {
+            return saveOutcome.getReplayedResponse();
+        }
+
+        CoreEntity payment = saveOutcome.getPayment();
+        RemotePayCreateResponse remoteResponse = remotePayService.connectPaymentForPrepare(
+                userId,
+                request.getRemoteRequestId(),
+                payment);
+        log.info("remote connectPaymentForPrepare response : {}", remoteResponse);
+
+        payment.connectRemoteRequest(remoteResponse.getRequest_id(), now);
+        payment.payPendingStatusUpdatePayment(now);
+
+        return finalizePrepare(payment, userId);
     }
 
     // [be] 다윤 260526 비밀번호 확인 및 실결제 요청
@@ -287,8 +326,8 @@ public class CoreService {
                 pageable);
 
         List<PaymentListResonse.PaymentItem> items = paymentSlice.getContent().stream()
-                        .map(this::toPaymentItem)
-                        .toList();
+                .map(this::toPaymentItem)
+                .toList();
 
         return PaymentListResonse.builder()
                 .items(items)
@@ -536,6 +575,26 @@ public class CoreService {
                         .build());
 
         payment.hostDutchSessionPayment(dutchResponse.getSession_id(), CoreEntity.DutchRole.HOST);
+    }
+
+    private void createRemoteDraftIfNeeded(
+            Long userId,
+            CoreEntity payment,
+            CoreEntity.PaymentType paymentType,
+            LocalDateTime now) {
+        if (paymentType != CoreEntity.PaymentType.REMOTE) {
+            return;
+        }
+
+        RemotePayCreateResponse remoteResponse = remotePayService.createDraftFromCore(
+                userId,
+                RemotePayDraftCreateRequest.builder()
+                        .source_payment_id(payment.getPaymentId())
+                        .description(payment.getOrder_name())
+                        .build());
+
+        log.info("remote createDraftFromCore response : {}", remoteResponse);
+        payment.connectRemoteRequest(remoteResponse.getRequest_id(), now);
     }
 
     private ResponseEntity<PrepareResponse> prepareDutchPayment(
@@ -1004,6 +1063,7 @@ public class CoreService {
                 .paymentIntent(payment.getPayment_intent() == null ? null : payment.getPayment_intent().name())
                 .dutchRole(payment.getDutch_role() == null ? null : payment.getDutch_role().name())
                 .dutchSessionId(payment.getDutch_session_id())
+                .remoteRequestId(payment.getRemote_request_id())
                 .amount(payment.getAmount())
                 .build();
     }
@@ -1049,6 +1109,49 @@ public class CoreService {
                 .dutch_role(dutchRole)
                 .payment_intent(paymentIntent)
                 .dutch_session_id(request.getSessionId())
+                .updatedAt(now)
+                .created_at(now)
+                .build();
+    }
+
+    private DutchPaymentSaveOutcome saveRemoteDeputyPaymentWithIdempotencyGuard(
+            Long userId,
+            String normalizedIdempotencyKey,
+            RemoteMemberPrepareRequest request,
+            LocalDateTime now) {
+        try {
+            CoreEntity payment = coreRepository.saveAndFlush(createRemoteDeputyPaymentEntity(
+                    userId,
+                    normalizedIdempotencyKey,
+                    request,
+                    now));
+            return DutchPaymentSaveOutcome.saved(payment);
+        } catch (DataIntegrityViolationException e) {
+            Optional<ResponseEntity<PrepareResponse>> replayed = findReplayedPrepareResponse(userId,
+                    normalizedIdempotencyKey);
+            if (replayed.isPresent()) {
+                return DutchPaymentSaveOutcome.replayed(replayed.get());
+            }
+            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
+        }
+    }
+
+    private CoreEntity createRemoteDeputyPaymentEntity(
+            Long userId,
+            String normalizedIdempotencyKey,
+            RemoteMemberPrepareRequest request,
+            LocalDateTime now) {
+        return CoreEntity.builder()
+                .userId(userId)
+                .merchant_id(request.getMerchantId())
+                .idempotencyKey(normalizedIdempotencyKey)
+                .order_no(qrService.generateUniqueOrderNo(now))
+                .order_name(request.getOrderName())
+                .amount(request.getAmount())
+                .payment_status(CoreEntity.PaymentStatus.CREATED)
+                .payment_type(CoreEntity.PaymentType.REMOTE)
+                .channel_type(CoreEntity.ChannelType.ONLINE)
+                .remote_request_id(request.getRemoteRequestId())
                 .updatedAt(now)
                 .created_at(now)
                 .build();
