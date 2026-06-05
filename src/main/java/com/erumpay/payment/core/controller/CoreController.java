@@ -9,6 +9,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.erumpay.payment.core.domain.dto.PrepareRequest;
 import com.erumpay.payment.core.domain.dto.PrepareResponse;
+import com.erumpay.payment.core.domain.dto.UserWithdrawalResponse;
 import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
 import com.erumpay.payment.core.domain.dto.CanceledResponse;
@@ -136,6 +137,7 @@ public class CoreController {
             @Parameter(description = "조회 종료일(yyyy-MM-dd). 선택한 경우에만 전달", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) @RequestParam(name = "end", required = false) LocalDate end,
             @Parameter(description = "결제수단(SINGLE, DUTCH, REMOTE). 선택한 경우에만 전달", required = false) @RequestParam(name = "paymentType", required = false) String paymentType,
             @Parameter(description = "적용유형(BENEFIT_SINGLE, BENEFIT_SPLIT, PERF_SINGLE, PERF_SPLIT). 선택한 경우에만 전달", required = false) @RequestParam(name = "strategyType", required = false) String strategyType) {
+        log.info("/payment controller");
         return ResponseEntity.ok(coreService.getAllPayments(
                 userId,
                 page,
@@ -153,7 +155,19 @@ public class CoreController {
             @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
             @Parameter(description = "결제 ID", required = true) @PathVariable("paymentId") Long paymentId) {
 
+        log.info("/paymentId controller");
         return ResponseEntity.ok(coreService.getDetailPayment(userId, paymentId));
+    }
+
+    // [be] 다윤 260605 20:00 | 사용자 회원 탈퇴 시 미결제건 조회
+    @GetMapping("/withdrawal-validation")
+    @Operation(summary = "회원 탈퇴 가능 여부 조회", description = "미결제 또는 처리 중인 결제 건이 있으면 탈퇴 불가로 응답한다.")
+    public ResponseEntity<UserWithdrawalResponse> getWithdrawalValidate(
+            @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId) {
+
+        log.info("/payment/withdrawal-validation controller");
+
+        return ResponseEntity.ok(coreService.getWithdrawalValidate(userId));
     }
 
 }
