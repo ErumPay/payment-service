@@ -23,7 +23,7 @@ public class PaidCardRequest {
     private String maskedNumber;
     private String cardName;
     private Long paidAmount;
-    private Long discountAmount;
+    private Long totalBenefitAmount;
     private String benefitDesc;
     private LocalDateTime paidAt;
 }

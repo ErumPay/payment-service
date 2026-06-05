@@ -30,6 +30,7 @@ import com.erumpay.payment.core.client.card.dto.PaymentResultResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
 import com.erumpay.payment.core.client.pg.dto.PgPayCancelRequest;
+import com.erumpay.payment.core.client.pg.dto.PgSplitPayResponse;
 import com.erumpay.payment.core.client.recommend.RecommendClient;
 import com.erumpay.payment.core.client.recommend.dto.RecommendRequest;
 import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
@@ -74,7 +75,9 @@ public class CoreService {
     private static final String PG_STATUS_REJECTED = "REJECTED";
     private static final String PG_STATUS_CANCELLED = "CANCELLED";
     private static final String PG_STATUS_FAILED = "FAILED";
+    private static final String PG_STATUS_COMPENSATION_REQUIRED = "COMPENSATION_REQUIRED";
     private static final String PG_ERROR_ALREADY_CANCELLED = "PAYMENT_ALREADY_CANCELLED";
+    private static final String SPLIT_CANCEL_REASON = "사용자 요청으로 분할결제 전체 취소";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
     private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
     private static final Duration RECOMMENDATION_CACHE_TTL = Duration.ofMinutes(30);
@@ -630,8 +633,37 @@ public class CoreService {
             Long paymentId,
             String normalizedIdempotencyKey,
             List<CardDetailEntity> cards) {
+        if (payment.getPgGroupId() != null) {
+            cancelSplitCardsInPg(payment, paymentId, normalizedIdempotencyKey, payment.getPgGroupId(), cards);
+            return;
+        }
+
         for (CardDetailEntity card : cards) {
             cancelSingleCardInPg(payment, paymentId, normalizedIdempotencyKey, card);
+        }
+    }
+
+    private void cancelSplitCardsInPg(
+            CoreEntity payment,
+            Long paymentId,
+            String normalizedIdempotencyKey,
+            Long pgGroupId,
+            List<CardDetailEntity> cards) {
+        cards.forEach(card -> corePgPaymentPersistenceService.markCardCancelRequested(card.getPayment_card_id()));
+        try {
+            PgSplitPayResponse pgResponse = requestPgSplitCancel(
+                    payment,
+                    paymentId,
+                    normalizedIdempotencyKey,
+                    pgGroupId);
+            validatePgSplitCancelResponse(pgResponse);
+            LocalDateTime canceledAt = LocalDateTime.now();
+            cards.forEach(card -> corePgPaymentPersistenceService.markCardCanceled(
+                    card.getPayment_card_id(),
+                    canceledAt));
+        } catch (RuntimeException e) {
+            cards.forEach(card -> corePgPaymentPersistenceService.markCardCancelFailed(card.getPayment_card_id()));
+            throw e;
         }
     }
 
@@ -681,6 +713,32 @@ public class CoreService {
         }
     }
 
+    private PgSplitPayResponse requestPgSplitCancel(
+            CoreEntity payment,
+            Long paymentId,
+            String normalizedIdempotencyKey,
+            Long pgGroupId) {
+        PgPayCancelRequest cancelRequest = PgPayCancelRequest.builder()
+                .payPaymentId(paymentId)
+                .merchantId(payment.getMerchant_id())
+                .cancelReason(SPLIT_CANCEL_REASON)
+                .build();
+
+        try {
+            return pgClient.pgSplitPaymentCancelRequest(
+                    pgAuthorization,
+                    normalizedIdempotencyKey,
+                    pgGroupId,
+                    cancelRequest);
+        } catch (FeignException e) {
+            log.error("pg split cancel feign error. status={}", e.status());
+            if (e.status() >= 400 && e.status() < 500) {
+                throw new CustomException(ErrorCode.CANCELED_PG_REJECTED, e);
+            }
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR, e);
+        }
+    }
+
     private void validatePgCancelResponse(PgAuthPayResponse pgResponse) {
         if (pgResponse == null || pgResponse.getStatus() == null) {
             throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
@@ -691,6 +749,25 @@ public class CoreService {
         }
 
         if (PG_STATUS_FAILED.equalsIgnoreCase(pgResponse.getStatus())) {
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+        }
+
+        if (!PG_STATUS_CANCELLED.equalsIgnoreCase(pgResponse.getStatus())) {
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+        }
+    }
+
+    private void validatePgSplitCancelResponse(PgSplitPayResponse pgResponse) {
+        if (pgResponse == null || pgResponse.getStatus() == null) {
+            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+        }
+
+        if (PG_STATUS_REJECTED.equalsIgnoreCase(pgResponse.getStatus())) {
+            throw new CustomException(ErrorCode.CANCELED_PG_REJECTED);
+        }
+
+        if (PG_STATUS_FAILED.equalsIgnoreCase(pgResponse.getStatus())
+                || PG_STATUS_COMPENSATION_REQUIRED.equalsIgnoreCase(pgResponse.getStatus())) {
             throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
         }
 

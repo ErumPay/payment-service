@@ -283,6 +283,7 @@ public class CorePgPaymentService {
 
         return PgAuthPayResponse.builder()
                 .pgTxnId(splitItem.getPgTxnId())
+                .pgGroupId(splitItem.getPgGroupId())
                 .payPaymentId(splitItem.getPayPaymentId())
                 .merchantId(splitItem.getMerchantId())
                 .txnType(splitItem.getTxnType())
@@ -722,10 +723,9 @@ public class CorePgPaymentService {
             approvalNumber = "UNKNOWN_APPROVAL";
         }
 
-        Long paidAmount = pgResponse.getAmount();
-        if (paidAmount == null) {
-            paidAmount = card.getAmount();
-        }
+        RecommendResponse.Card recommendedCard = selectedRecommendation == null ? null
+                : findMatchingRecommendedCard(selectedRecommendation.getCards(), card);
+        Long paidAmount = resolveApprovedAmount(pgResponse, card, recommendedCard);
         if (paidAmount == null) {
             log.warn("paid amount is missing. fallback to 0. paymentId={}, pgTxnId={}, cardId={}",
                     payment.getPaymentId(),
@@ -742,11 +742,9 @@ public class CorePgPaymentService {
         String cardName = (billingKey == null || billingKey.getCardName() == null || billingKey.getCardName().isBlank())
                 ? "UNKNOWN_CARD"
                 : billingKey.getCardName();
-        RecommendResponse.Card recommendedCard = selectedRecommendation == null ? null
-                : findMatchingRecommendedCard(selectedRecommendation.getCards(), card);
-        Long discountAmount = recommendedCard == null || recommendedCard.getDiscountAmount() == null
+        Long totalBenefitAmount = recommendedCard == null || recommendedCard.getTotalBenefitAmount() == null
                 ? 0L
-                : recommendedCard.getDiscountAmount();
+                : recommendedCard.getTotalBenefitAmount();
         String benefitDesc = selectedRecommendation == null ? null : selectedRecommendation.getReason();
 
         return PaidCardRequest.builder()
@@ -757,7 +755,7 @@ public class CorePgPaymentService {
                 .maskedNumber(maskedNumber)
                 .cardName(cardName)
                 .paidAmount(paidAmount)
-                .discountAmount(discountAmount)
+                .totalBenefitAmount(totalBenefitAmount)
                 .benefitDesc(benefitDesc)
                 .paidAt(paidAt)
                 .build();
@@ -867,9 +865,7 @@ public class CorePgPaymentService {
         PgAuthPayResponse pgResponse = approvedPayment.pgResponse();
         RecommendResponse.Card recommendedCard = selectedRecommendation == null ? null
                 : findMatchingRecommendedCard(selectedRecommendation.getCards(), card);
-        Long approvedAmount = pgResponse == null || pgResponse.getAmount() == null
-                ? card.getAmount()
-                : pgResponse.getAmount();
+        Long approvedAmount = resolveApprovedAmount(pgResponse, card, recommendedCard);
 
         return PaymentResultRequest.Card.builder()
                 .cardId(card.getCardId())
@@ -899,6 +895,19 @@ public class CorePgPaymentService {
             return null;
         }
         return recommendedCard.getAmount() == null ? recommendedCard.getApprovedAmount() : recommendedCard.getAmount();
+    }
+
+    private Long resolveApprovedAmount(
+            PgAuthPayResponse pgResponse,
+            PinAndPayRequest.CardPortion card,
+            RecommendResponse.Card recommendedCard) {
+        if (pgResponse != null && pgResponse.getAmount() != null) {
+            return pgResponse.getAmount();
+        }
+        if (card != null && card.getAmount() != null) {
+            return card.getAmount();
+        }
+        return resolveRecommendedCardAmount(recommendedCard);
     }
 
     private PaymentResultRequest.AppliedBenefit toAppliedBenefit(RecommendResponse.Card recommendedCard) {

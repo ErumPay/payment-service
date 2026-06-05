@@ -58,6 +58,9 @@ public class CorePgPaymentPersistenceService {
 
         LocalDateTime now = LocalDateTime.now();
         payment.updateStrategyType(strategyType, now);
+        if (pgResponse != null && pgResponse.getPgGroupId() != null) {
+            payment.updatePgGroupId(pgResponse.getPgGroupId(), now);
+        }
         payment.paidStatusUpdatePayment(now);
 
         EventEntity savedEvent = EventEntity.builder()
@@ -163,7 +166,7 @@ public class CorePgPaymentPersistenceService {
                 || paidCard.getMaskedNumber() == null
                 || paidCard.getCardName() == null
                 || paidCard.getPaidAmount() == null
-                || paidCard.getDiscountAmount() == null
+                || paidCard.getTotalBenefitAmount() == null
                 || paidCard.getPaidAt() == null) {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
@@ -176,7 +179,7 @@ public class CorePgPaymentPersistenceService {
                 .masked_number(paidCard.getMaskedNumber())
                 .card_name(paidCard.getCardName())
                 .paid_amount(paidCard.getPaidAmount())
-                .discount_amount(paidCard.getDiscountAmount())
+                .discount_amount(paidCard.getTotalBenefitAmount())
                 .benefit_desc(paidCard.getBenefitDesc())
                 .paid_at(paidCard.getPaidAt())
                 .card_status(CardStatus.PAID)
