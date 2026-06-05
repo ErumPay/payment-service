@@ -658,13 +658,38 @@ public class CoreService {
                     pgGroupId);
             validatePgSplitCancelResponse(pgResponse);
             LocalDateTime canceledAt = LocalDateTime.now();
-            cards.forEach(card -> corePgPaymentPersistenceService.markCardCanceled(
-                    card.getPayment_card_id(),
-                    canceledAt));
+            corePgPaymentPersistenceService.markCardsCanceled(paymentCardIds(cards), canceledAt);
         } catch (RuntimeException e) {
-            cards.forEach(card -> corePgPaymentPersistenceService.markCardCancelFailed(card.getPayment_card_id()));
+            markSplitCardCancelFailed(payment.getPaymentId(), cards, e);
             throw e;
         }
+    }
+
+    private List<Long> paymentCardIds(List<CardDetailEntity> cards) {
+        return cards.stream()
+                .map(CardDetailEntity::getPayment_card_id)
+                .toList();
+    }
+
+    private void markSplitCardCancelFailed(
+            Long paymentId,
+            List<CardDetailEntity> cards,
+            RuntimeException cause) {
+        for (CardDetailEntity card : cards) {
+            try {
+                corePgPaymentPersistenceService.markCardCancelFailed(card.getPayment_card_id());
+            } catch (RuntimeException statusException) {
+                log.error(
+                        "split card cancel failed status update failed. paymentId={}, paymentCardId={}, alert=CANCEL_REQUESTED_MAY_REMAIN",
+                        paymentId,
+                        card.getPayment_card_id(),
+                        statusException);
+            }
+        }
+        log.error("split card cancel failed. paymentId={}, paymentCardIds={}",
+                paymentId,
+                paymentCardIds(cards),
+                cause);
     }
 
     private void cancelSingleCardInPg(
@@ -732,6 +757,9 @@ public class CoreService {
                     cancelRequest);
         } catch (FeignException e) {
             log.error("pg split cancel feign error. status={}", e.status());
+            if (isPgAlreadyCancelled(e)) {
+                return alreadyCancelledPgSplitResponse(payment, paymentId, pgGroupId);
+            }
             if (e.status() >= 400 && e.status() < 500) {
                 throw new CustomException(ErrorCode.CANCELED_PG_REJECTED, e);
             }
@@ -786,6 +814,18 @@ public class CoreService {
                 .payPaymentId(paymentId)
                 .merchantId(payment.getMerchant_id())
                 .status(PG_STATUS_CANCELLED)
+                .build();
+    }
+
+    private PgSplitPayResponse alreadyCancelledPgSplitResponse(CoreEntity payment, Long paymentId, Long pgGroupId) {
+        return PgSplitPayResponse.builder()
+                .pgGroupId(pgGroupId)
+                .payPaymentId(paymentId)
+                .merchantId(payment.getMerchant_id())
+                .totalAmount(payment.getAmount())
+                .status(PG_STATUS_CANCELLED)
+                .items(List.of())
+                .updatedAt(LocalDateTime.now())
                 .build();
     }
 
