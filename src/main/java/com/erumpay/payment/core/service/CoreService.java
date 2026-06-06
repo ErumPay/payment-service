@@ -25,13 +25,16 @@ import com.erumpay.payment.core.client.auth.AuthClient;
 import com.erumpay.payment.core.client.auth.dto.AuthPinRequest;
 import com.erumpay.payment.core.client.auth.dto.AuthPinResponse;
 import com.erumpay.payment.core.client.card.CardClient;
+import com.erumpay.payment.core.client.card.CardFeignErrorMapper;
 import com.erumpay.payment.core.client.card.dto.PaymentResultRequest;
 import com.erumpay.payment.core.client.card.dto.PaymentResultResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
+import com.erumpay.payment.core.client.pg.PgFeignErrorMapper;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
 import com.erumpay.payment.core.client.pg.dto.PgPayCancelRequest;
 import com.erumpay.payment.core.client.pg.dto.PgSplitPayResponse;
 import com.erumpay.payment.core.client.recommend.RecommendClient;
+import com.erumpay.payment.core.client.recommend.RecommendFeignErrorMapper;
 import com.erumpay.payment.core.client.recommend.dto.RecommendRequest;
 import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
 import com.erumpay.payment.core.dao.CardDetailRepository;
@@ -98,6 +101,7 @@ public class CoreService {
 
     private final PgClient pgClient;
     private final CardClient cardClient;
+    private final CardFeignErrorMapper cardFeignErrorMapper;
     private final CardDetailRepository cardDetailRepository;
     private final CoreRepository coreRepository;
     private final CoreValidationService coreValidationService;
@@ -109,9 +113,11 @@ public class CoreService {
     private final RemotePayService remotePayService;
     private final EntityManager entityManager;
     private final RecommendClient recommendClient;
+    private final RecommendFeignErrorMapper recommendFeignErrorMapper;
     private final CoreSseService coreSseService;
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate stringRedisTemplate;
+    private final PgFeignErrorMapper pgFeignErrorMapper;
 
     @Value("${pg.authorization}")
     private String pgAuthorization;
@@ -120,6 +126,12 @@ public class CoreService {
     public ResponseEntity<PrepareResponse> preparePay(Long userId, String idempotencyKey, PrepareRequest request) {
         log.info("/payment/prepare Service");
 
+        if (request == null) {
+            throw new CustomException(ErrorCode.PAYMENT_REQUEST_BODY_INVALID);
+        }
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
         String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
         CoreEntity payment = findPaymentOrThrow(request.getPaymentId());
 
@@ -151,6 +163,12 @@ public class CoreService {
             String idempotencyKey,
             DutchMemberPrepareRequest request) {
 
+        if (request == null) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
+        }
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
         String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
 
         return prepareDutchPayment(
@@ -169,6 +187,12 @@ public class CoreService {
             String idempotencyKey,
             DutchMemberPrepareRequest request) {
 
+        if (request == null) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
+        }
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
         String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
 
         return prepareDutchPayment(
@@ -186,6 +210,12 @@ public class CoreService {
     public ResponseEntity<PrepareResponse> prepareProxy(Long userId, String idempotencyKey,
             RemoteMemberPrepareRequest request) {
 
+        if (request == null) {
+            throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
+        }
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
         String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
         Optional<ResponseEntity<PrepareResponse>> idempotentResponse = findReplayedPrepareResponse(
                 userId,
@@ -222,6 +252,12 @@ public class CoreService {
     public ResponseEntity<PinAndPayResponse> requestPay(Long userId, String idempotencyKey, PinAndPayRequest request) {
         log.info("/payment/request Service");
 
+        if (request == null) {
+            throw new CustomException(ErrorCode.PAYMENT_REQUEST_BODY_INVALID);
+        }
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
         String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
         CoreEntity payment = findPaymentOrThrow(request.getPaymentId());
 
@@ -255,7 +291,10 @@ public class CoreService {
             throw new CustomException(mapAuthPinError(e.status()), e);
         }
 
-        if (res == null || !res.isVerified()) {
+        if (res == null) {
+            throw new CustomException(ErrorCode.AUTH_RESPONSE_INVALID);
+        }
+        if (!res.isVerified()) {
             throw new CustomException(ErrorCode.PIN_INVALID);
         }
 
@@ -264,7 +303,7 @@ public class CoreService {
 
     private ErrorCode mapAuthPinError(int status) {
         return switch (status) {
-            case 400 -> ErrorCode.BAD_REQUEST;
+            case 400 -> ErrorCode.AUTH_REQUEST_INVALID;
             case 401 -> ErrorCode.PIN_INVALID;
             case 404 -> ErrorCode.PIN_NOT_SET;
             case 423 -> ErrorCode.PIN_LOCKED;
@@ -275,6 +314,9 @@ public class CoreService {
     // [be] 다윤 260527 일반 결제 취소
     public CanceledResponse cancelPay(Long userId, String idempotencyKey, Long paymentId) {
         log.info("/payment/cancel Service");
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
         String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
 
         CoreEntity payment = findPaymentOrThrow(paymentId);
@@ -306,8 +348,11 @@ public class CoreService {
             LocalDate end,
             String paymentType,
             String strategyType) {
-        if (userId == null || page < 0) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
+        if (page < 0) {
+            throw new CustomException(ErrorCode.PAYMENT_PAGE_INVALID);
         }
 
         int size = 20;
@@ -341,12 +386,14 @@ public class CoreService {
     public PaymentAllFetchResponse getRecommendationUsageSummary(
             Long userId,
             PaymentAllFetchRequest request) {
-        if (userId == null
-                || request == null
-                || request.getFrom() == null
-                || request.getTo() == null
-                || request.getFrom().isAfter(request.getTo())) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
+        if (request == null) {
+            throw new CustomException(ErrorCode.PAYMENT_REQUEST_BODY_INVALID);
+        }
+        if (request.getFrom() == null || request.getTo() == null || request.getFrom().isAfter(request.getTo())) {
+            throw new CustomException(ErrorCode.PAYMENT_DATE_RANGE_INVALID);
         }
 
         LocalDateTime fromDateTime = request.getFrom().atStartOfDay();
@@ -385,7 +432,10 @@ public class CoreService {
     // [be] 다윤 260602 10:00 | 결제 내역 단일 조회
     @Transactional(readOnly = true)
     public PaymentDetailResponse getDetailPayment(Long userId, Long paymentId) {
-        if (userId == null || paymentId == null) {
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
+        if (paymentId == null) {
             throw new CustomException(ErrorCode.BAD_REQUEST);
         }
 
@@ -401,7 +451,7 @@ public class CoreService {
     @Transactional(readOnly = true)
     public UserWithdrawalResponse getWithdrawalValidate(Long userId) {
         if (userId == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
         }
 
         long unpaidPaymentCount = coreRepository.countByUserIdAndPaymentStatuses(
@@ -430,12 +480,12 @@ public class CoreService {
 
     private PaymentHistoryDateRange resolvePaymentHistoryDateRange(String period, LocalDate start, LocalDate end) {
         if (period != null && (start != null || end != null)) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.PAYMENT_PERIOD_INVALID);
         }
 
         if (start != null || end != null) {
             if (start == null || end == null || start.isAfter(end)) {
-                throw new CustomException(ErrorCode.BAD_REQUEST);
+                throw new CustomException(ErrorCode.PAYMENT_DATE_RANGE_INVALID);
             }
             return new PaymentHistoryDateRange(start.atStartOfDay(), end.plusDays(1).atStartOfDay());
         }
@@ -449,7 +499,7 @@ public class CoreService {
             case "WEEK" -> today.with(DayOfWeek.MONDAY);
             case "MONTH" -> today.withDayOfMonth(1);
             case "YEAR" -> today.withDayOfYear(1);
-            default -> throw new CustomException(ErrorCode.BAD_REQUEST);
+            default -> throw new CustomException(ErrorCode.PAYMENT_PERIOD_INVALID);
         };
 
         return new PaymentHistoryDateRange(
@@ -469,7 +519,7 @@ public class CoreService {
         try {
             return CoreEntity.PaymentType.valueOf(paymentType.trim().toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+            throw new CustomException(ErrorCode.PAYMENT_TYPE_FILTER_INVALID, e);
         }
     }
 
@@ -481,7 +531,7 @@ public class CoreService {
         try {
             return CoreEntity.StrategyType.valueOf(strategyType.trim().toUpperCase());
         } catch (IllegalArgumentException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+            throw new CustomException(ErrorCode.PAYMENT_STRATEGY_TYPE_INVALID, e);
         }
     }
 
@@ -493,7 +543,7 @@ public class CoreService {
         return switch (status.trim().toUpperCase()) {
             case "PAID" -> List.of(CoreEntity.PaymentStatus.PAID);
             case "CANCELED" -> List.of(CoreEntity.PaymentStatus.CANCELED);
-            default -> throw new CustomException(ErrorCode.BAD_REQUEST);
+            default -> throw new CustomException(ErrorCode.PAYMENT_STATUS_FILTER_INVALID);
         };
     }
 
@@ -510,13 +560,13 @@ public class CoreService {
 
     private void validatePaymentOwnerOrUnassigned(CoreEntity payment, Long userId) {
         if (payment.getUserId() != null && !payment.getUserId().equals(userId)) {
-            throw new CustomException(ErrorCode.FORBIDDEN);
+            throw new CustomException(ErrorCode.PAYMENT_OWNER_MISMATCH);
         }
     }
 
     private void validatePaymentOwner(CoreEntity payment, Long userId) {
         if (payment.getUserId() == null || !payment.getUserId().equals(userId)) {
-            throw new CustomException(ErrorCode.FORBIDDEN);
+            throw new CustomException(ErrorCode.PAYMENT_OWNER_MISMATCH);
         }
     }
 
@@ -526,6 +576,9 @@ public class CoreService {
     }
 
     private void validateAmountMatches(Long expectedAmount, Long requestedAmount) {
+        if (expectedAmount == null || requestedAmount == null) {
+            throw new CustomException(ErrorCode.AMOUNT_MISMATCH);
+        }
         if (!expectedAmount.equals(requestedAmount)) {
             throw new CustomException(ErrorCode.AMOUNT_MISMATCH);
         }
@@ -675,6 +728,9 @@ public class CoreService {
         validatePaymentOwner(payment, userId);
         validateIdempotencyKeyMatches(payment, normalizedIdempotencyKey);
         coreValidationService.validateRequestStatus(payment.getPayment_status());
+        if (request.getPin() == null || request.getPin().isBlank()) {
+            throw new CustomException(ErrorCode.PAYMENT_PIN_REQUIRED);
+        }
         validateAmountMatches(payment.getAmount(), request.getTotalAmount());
         coreValidationService.validateCardAmounts(request);
         validateRemotePaymentRequestIfNeeded(payment);
@@ -683,7 +739,7 @@ public class CoreService {
     private void validateIdempotencyKeyMatches(CoreEntity payment, String normalizedIdempotencyKey) {
         String savedIdempotencyKey = payment.getIdempotencyKey();
         if (savedIdempotencyKey == null || !savedIdempotencyKey.equals(normalizedIdempotencyKey)) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.PAYMENT_IDEMPOTENCY_KEY_MISMATCH);
         }
     }
 
@@ -819,10 +875,9 @@ public class CoreService {
             if (isPgAlreadyCancelled(e)) {
                 return alreadyCancelledPgResponse(payment, paymentId, card);
             }
-            if (e.status() >= 400 && e.status() < 500) {
-                throw new CustomException(ErrorCode.CANCELED_PG_REJECTED, e);
-            }
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR, e);
+            throw new CustomException(
+                    pgFeignErrorMapper.map(e, ErrorCode.CANCELED_PG_REJECTED, ErrorCode.INTERNAL_PG_SERVER_ERROR),
+                    e);
         }
     }
 
@@ -848,16 +903,15 @@ public class CoreService {
             if (isPgAlreadyCancelled(e)) {
                 return alreadyCancelledPgSplitResponse(payment, paymentId, pgGroupId);
             }
-            if (e.status() >= 400 && e.status() < 500) {
-                throw new CustomException(ErrorCode.CANCELED_PG_REJECTED, e);
-            }
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR, e);
+            throw new CustomException(
+                    pgFeignErrorMapper.map(e, ErrorCode.CANCELED_PG_REJECTED, ErrorCode.INTERNAL_PG_SERVER_ERROR),
+                    e);
         }
     }
 
     private void validatePgCancelResponse(PgAuthPayResponse pgResponse) {
         if (pgResponse == null || pgResponse.getStatus() == null) {
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PG_RESPONSE_INVALID);
         }
 
         if (PG_STATUS_REJECTED.equalsIgnoreCase(pgResponse.getStatus())) {
@@ -865,17 +919,17 @@ public class CoreService {
         }
 
         if (PG_STATUS_FAILED.equalsIgnoreCase(pgResponse.getStatus())) {
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PG_CANCEL_FAILED);
         }
 
         if (!PG_STATUS_CANCELLED.equalsIgnoreCase(pgResponse.getStatus())) {
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PG_PAYMENT_STATUS_INVALID);
         }
     }
 
     private void validatePgSplitCancelResponse(PgSplitPayResponse pgResponse) {
         if (pgResponse == null || pgResponse.getStatus() == null) {
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PG_RESPONSE_INVALID);
         }
 
         if (PG_STATUS_REJECTED.equalsIgnoreCase(pgResponse.getStatus())) {
@@ -884,11 +938,11 @@ public class CoreService {
 
         if (PG_STATUS_FAILED.equalsIgnoreCase(pgResponse.getStatus())
                 || PG_STATUS_COMPENSATION_REQUIRED.equalsIgnoreCase(pgResponse.getStatus())) {
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PG_COMPENSATION_CANCEL_FAILED);
         }
 
         if (!PG_STATUS_CANCELLED.equalsIgnoreCase(pgResponse.getStatus())) {
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PG_PAYMENT_STATUS_INVALID);
         }
     }
 
@@ -948,6 +1002,18 @@ public class CoreService {
                     response == null ? null : response.getApplied(),
                     response == null ? null : response.getAppliedCardCount(),
                     response == null ? null : response.getReason());
+        } catch (FeignException e) {
+            ErrorCode mappedError = cardFeignErrorMapper.map(
+                    e,
+                    ErrorCode.CARD_PAYMENT_RESULT_INVALID,
+                    ErrorCode.CARD_PAYMENT_RESULT_SEND_FAILED);
+            log.error("card payment result notify failed. paymentId={}, userId={}, eventType={}, mappedError={}, body={}",
+                    payment.getPaymentId(),
+                    payment.getUserId(),
+                    CARD_EVENT_CANCELED,
+                    mappedError.name(),
+                    e.contentUTF8(),
+                    e);
         } catch (RuntimeException e) {
             log.error("card payment result notify failed. paymentId={}, userId={}, eventType={}",
                     payment.getPaymentId(),
@@ -1172,6 +1238,7 @@ public class CoreService {
 
             if (recommendList == null || recommendList.getResults() == null) {
                 log.warn("recommend response is empty. paymentId={}, userId={}", payment.getPaymentId(), userId);
+                pushRecommendFailedEvent(payment.getPaymentId(), ErrorCode.REC_RESPONSE_INVALID);
                 return;
             }
             log.info("recommend list response:\n{}",
@@ -1184,13 +1251,18 @@ public class CoreService {
                     recommendList);
 
         } catch (FeignException e) {
-            log.error("recommend feign error. paymentId={}, userId={}, status={}, body={}",
-                    payment.getPaymentId(), userId, e.status(), e.contentUTF8());
-            pushRecommendFailedEvent(payment.getPaymentId(), e.status(), "추천 서비스 호출 실패");
+            ErrorCode mappedError = recommendFeignErrorMapper.map(e);
+            log.error("recommend feign error. paymentId={}, userId={}, status={}, mappedError={}, body={}",
+                    payment.getPaymentId(), userId, e.status(), mappedError.name(), e.contentUTF8(), e);
+            pushRecommendFailedEvent(payment.getPaymentId(), mappedError);
+        } catch (CustomException e) {
+            log.error("recommend request custom error. paymentId={}, userId={}, errorCode={}",
+                    payment.getPaymentId(), userId, e.getErrorCode().name(), e);
+            pushRecommendFailedEvent(payment.getPaymentId(), e.getErrorCode());
         } catch (Exception e) {
             log.error("recommend request unexpected error. paymentId={}, userId={}",
                     payment.getPaymentId(), userId, e);
-            pushRecommendFailedEvent(payment.getPaymentId(), 500, "추천 처리 중 오류");
+            pushRecommendFailedEvent(payment.getPaymentId(), ErrorCode.REC_INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -1210,6 +1282,7 @@ public class CoreService {
                     RECOMMENDATION_CACHE_TTL.toSeconds());
         } catch (JsonProcessingException | RuntimeException e) {
             log.warn("recommendation cache save failed. paymentId={}", paymentId, e);
+            throw new CustomException(ErrorCode.REC_CACHE_WRITE_FAILED, e);
         }
     }
 
@@ -1221,6 +1294,10 @@ public class CoreService {
                         "paymentId", paymentId,
                         "status", status,
                         "reason", reason));
+    }
+
+    private void pushRecommendFailedEvent(Long paymentId, ErrorCode errorCode) {
+        pushRecommendFailedEvent(paymentId, errorCode.getStatus().value(), errorCode.getMessage());
     }
 
     @FunctionalInterface

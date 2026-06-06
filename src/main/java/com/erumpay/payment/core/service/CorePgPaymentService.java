@@ -13,12 +13,14 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import com.erumpay.payment.core.client.card.CardClient;
+import com.erumpay.payment.core.client.card.CardFeignErrorMapper;
 import com.erumpay.payment.core.client.card.dto.CardBillingKeyResponse;
 import com.erumpay.payment.core.client.card.dto.CardBillingKeysRequest;
 import com.erumpay.payment.core.client.card.dto.CardBillingKeysResponse;
 import com.erumpay.payment.core.client.card.dto.PaymentResultRequest;
 import com.erumpay.payment.core.client.card.dto.PaymentResultResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
+import com.erumpay.payment.core.client.pg.PgFeignErrorMapper;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
 import com.erumpay.payment.core.client.pg.dto.PgPayCancelRequest;
@@ -69,9 +71,11 @@ public class CorePgPaymentService {
     private final DutchPayService dutchPayService;
     private final RemotePayService remotePayService;
     private final CardClient cardClient;
+    private final CardFeignErrorMapper cardFeignErrorMapper;
     private final EventRepository eventRepository;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
+    private final PgFeignErrorMapper pgFeignErrorMapper;
 
     @Value("${pg.authorization}")
     private String pgAuthorization;
@@ -81,7 +85,7 @@ public class CorePgPaymentService {
 
         String savedIdempotencyKey = payment.getIdempotencyKey();
         if (savedIdempotencyKey == null || savedIdempotencyKey.isBlank()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.PAYMENT_STATE_INVALID);
         }
 
         boolean useAuthOnly = shouldUseAuthOnly(payment);
@@ -119,7 +123,7 @@ public class CorePgPaymentService {
             String savedIdempotencyKey,
             boolean useAuthOnly) {
         if (useAuthOnly && request.getCards().size() != 1) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.PAYMENT_CARD_LIST_REQUIRED);
         }
 
         if (!useAuthOnly && request.getCards().size() > 1) {
@@ -146,7 +150,7 @@ public class CorePgPaymentService {
                         pgResponse,
                         approvedPayments,
                         savedIdempotencyKey,
-                        new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR));
+                        new CustomException(ErrorCode.PG_RESPONSE_INVALID));
             }
 
             String pgStatus = pgResponse.getStatus();
@@ -194,10 +198,10 @@ public class CorePgPaymentService {
             log.error("pg split feign error. status={}, body={}",
                     e.status(),
                     trimForLog(maskSensitive(e.contentUTF8())));
-            if (e.status() >= 400 && e.status() < 500) {
-                return failPaymentAfterPgFailure(payment, ErrorCode.PG_PAYMENT_REJECTED, e);
-            }
-            return failPaymentAfterPgFailure(payment, ErrorCode.PG_PAYMENT_FAILED, e);
+            return failPaymentAfterPgFailure(
+                    payment,
+                    pgFeignErrorMapper.map(e, ErrorCode.PG_PAYMENT_REJECTED, ErrorCode.PG_PAYMENT_FAILED),
+                    e);
         }
 
         List<ApprovedCardPayment> approvedPayments = new ArrayList<>();
@@ -207,7 +211,7 @@ public class CorePgPaymentService {
                     toPgAuthPayResponse(pgResponse),
                     approvedPayments,
                     savedIdempotencyKey,
-                    new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR));
+                    new CustomException(ErrorCode.PG_RESPONSE_INVALID));
         }
 
         if (!PG_STATUS_APPROVED.equalsIgnoreCase(pgResponse.getStatus())) {
@@ -229,9 +233,9 @@ public class CorePgPaymentService {
                 failPaymentAfterPgFailure(
                         payment,
                         cardPgResponse,
-                        approvedPayments,
-                        savedIdempotencyKey,
-                        new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR));
+                    approvedPayments,
+                    savedIdempotencyKey,
+                    new CustomException(ErrorCode.PG_RESPONSE_INVALID));
             }
 
             String pgStatus = cardPgResponse.getStatus();
@@ -418,7 +422,7 @@ public class CorePgPaymentService {
             throw e;
         } catch (JsonProcessingException | RuntimeException e) {
             log.warn("recommendation cache read failed. paymentId={}, key={}", paymentId, cacheKey, e);
-            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e);
+            throw new CustomException(ErrorCode.REC_CACHE_READ_FAILED, e);
         }
     }
 
@@ -482,10 +486,9 @@ public class CorePgPaymentService {
             log.error("pg feign error. status={}, body={}",
                     e.status(),
                     trimForLog(maskSensitive(e.contentUTF8())));
-            if (e.status() >= 400 && e.status() < 500) {
-                throw new CustomException(ErrorCode.PG_PAYMENT_REJECTED, e);
-            }
-            throw new CustomException(ErrorCode.PG_PAYMENT_FAILED, e);
+            throw new CustomException(
+                    pgFeignErrorMapper.map(e, ErrorCode.PG_PAYMENT_REJECTED, ErrorCode.PG_PAYMENT_FAILED),
+                    e);
         }
     }
 
@@ -534,7 +537,7 @@ public class CorePgPaymentService {
             List<ApprovedCardPayment> approvedPayments,
             RecommendResponse.Result selectedRecommendation) {
         if (approvedPayments.isEmpty()) {
-            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PG_RESPONSE_INVALID);
         }
 
         PgAuthPayResponse firstPgResponse = approvedPayments.get(0).pgResponse();
@@ -640,7 +643,10 @@ public class CorePgPaymentService {
             return response.getBillingKeys().stream()
                     .collect(Collectors.toMap(CardBillingKeyResponse::getCardId, Function.identity()));
         } catch (FeignException e) {
-            ErrorCode mappedError = mapCardBillingKeyError(e.status());
+            ErrorCode mappedError = cardFeignErrorMapper.map(
+                    e,
+                    ErrorCode.CARD_BILLING_KEY_INVALID,
+                    ErrorCode.INTERNAL_CARD_SERVER_ERROR);
             log.error(
                     "card billing-keys feign error. paymentId={}, cardIds={}, userId={}, status={}, mappedError={}, body={}",
                     payment.getPaymentId(),
@@ -672,15 +678,6 @@ public class CorePgPaymentService {
             throw new CustomException(ErrorCode.CARD_BILLING_KEY_INVALID);
         }
         return billingKey;
-    }
-
-    private ErrorCode mapCardBillingKeyError(int status) {
-        return switch (status) {
-            case 400, 422 -> ErrorCode.CARD_BILLING_KEY_INVALID;
-            case 401, 403 -> ErrorCode.CARD_BILLING_KEY_FORBIDDEN;
-            case 404 -> ErrorCode.CARD_BILLING_KEY_NOT_FOUND;
-            default -> ErrorCode.INTERNAL_CARD_SERVER_ERROR;
-        };
     }
 
     private String trimForLog(String body) {
@@ -715,7 +712,7 @@ public class CorePgPaymentService {
                 || pgResponse.getPgTxnId() == null
                 || card == null
                 || card.getCardId() == null) {
-            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PAYMENT_CARD_DETAIL_SAVE_FAILED);
         }
 
         String approvalNumber = pgResponse.getPgApprovalNumber();
@@ -795,6 +792,18 @@ public class CorePgPaymentService {
                     response == null ? null : response.getApplied(),
                     response == null ? null : response.getAppliedCardCount(),
                     response == null ? null : response.getReason());
+        } catch (FeignException e) {
+            ErrorCode mappedError = cardFeignErrorMapper.map(
+                    e,
+                    ErrorCode.CARD_PAYMENT_RESULT_INVALID,
+                    ErrorCode.CARD_PAYMENT_RESULT_SEND_FAILED);
+            log.error("card payment result notify failed. paymentId={}, userId={}, eventType={}, mappedError={}, body={}",
+                    payment.getPaymentId(),
+                    payment.getUserId(),
+                    CARD_EVENT_APPROVED,
+                    mappedError.name(),
+                    e.contentUTF8(),
+                    e);
         } catch (RuntimeException e) {
             log.error("card payment result notify failed. paymentId={}, userId={}, eventType={}",
                     payment.getPaymentId(),
@@ -948,7 +957,7 @@ public class CorePgPaymentService {
 
         CoreEntity.PaymentIntent paymentIntent = payment.getPayment_intent();
         if (paymentIntent == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.PAYMENT_STATE_INVALID);
         }
 
         return paymentIntent == CoreEntity.PaymentIntent.DUTCH_HOST_AUTH_ONLY_PAY;
@@ -963,7 +972,7 @@ public class CorePgPaymentService {
             return;
         }
         if (payment.getDutch_session_id() == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.PAYMENT_DUTCH_LINK_INVALID);
         }
 
         dutchPayService.applyHostAuthorizationResult(
@@ -1089,18 +1098,18 @@ public class CorePgPaymentService {
                 EventEntity.EventType.AUTHORIZED,
                 PageRequest.of(0, 1));
         if (authorizedEvents.isEmpty()) {
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PG_PAYMENT_TRANSACTION_NOT_FOUND);
         }
         return authorizedEvents.get(0).getPg_txn_id();
     }
 
     private void validatePgAuthCancelResponse(PgAuthPayResponse pgResponse) {
         if (pgResponse == null || pgResponse.getStatus() == null) {
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PG_RESPONSE_INVALID);
         }
 
         if (!PG_STATUS_VOIDED.equalsIgnoreCase(pgResponse.getStatus())) {
-            throw new CustomException(ErrorCode.INTERNAL_PG_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PG_PAYMENT_STATUS_INVALID);
         }
     }
 

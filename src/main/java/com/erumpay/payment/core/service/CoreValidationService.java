@@ -57,35 +57,41 @@ public class CoreValidationService {
 
     public String normalizeIdempotencyKey(String idempotencyKey) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.INVALID_IDEMPOTENCY_KEY);
         }
         return idempotencyKey.trim();
     }
 
     public CoreEntity.PaymentType parsePaymentType(String paymentType) {
         if (paymentType == null || paymentType.isBlank()) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.PAYMENT_TYPE_INVALID);
         }
         try {
             return CoreEntity.PaymentType.valueOf(paymentType.trim().toUpperCase(Locale.ROOT));
         } catch (RuntimeException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.PAYMENT_TYPE_INVALID, e);
         }
     }
 
     public void validateCardAmounts(PinAndPayRequest request) {
-        if (request == null || request.getCards() == null || request.getCards().isEmpty() || request.getTotalAmount() == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+        if (request == null) {
+            throw new CustomException(ErrorCode.PAYMENT_REQUEST_BODY_INVALID);
+        }
+        if (request.getCards() == null || request.getCards().isEmpty()) {
+            throw new CustomException(ErrorCode.PAYMENT_CARD_LIST_REQUIRED);
+        }
+        if (request.getTotalAmount() == null) {
+            throw new CustomException(ErrorCode.PAYMENT_CARD_AMOUNT_INVALID);
         }
 
         long total = 0L;
         Set<Long> cardIds = new HashSet<>();
         for (PinAndPayRequest.CardPortion card : request.getCards()) {
             if (card.getCardId() == null || card.getAmount() == null || card.getAmount() <= 0) {
-                throw new CustomException(ErrorCode.BAD_REQUEST);
+                throw new CustomException(ErrorCode.PAYMENT_CARD_AMOUNT_INVALID);
             }
             if (!cardIds.add(card.getCardId())) {
-                throw new CustomException(ErrorCode.BAD_REQUEST);
+                throw new CustomException(ErrorCode.PAYMENT_CARD_DUPLICATED);
             }
             total += card.getAmount();
         }
@@ -103,9 +109,9 @@ public class CoreValidationService {
             throw new CustomException(ErrorCode.REQUEST_IN_PROGRESS);
         }
         if (isTerminalStatus(status)) {
-            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
+            throw new CustomException(ErrorCode.PAYMENT_ALREADY_PROCESSED);
         }
-        throw new CustomException(ErrorCode.BAD_REQUEST);
+        throw new CustomException(ErrorCode.PAYMENT_STATUS_NOT_PREPARABLE);
     }
 
     public void validateRequestStatus(CoreEntity.PaymentStatus status) {
@@ -116,9 +122,9 @@ public class CoreValidationService {
             throw new CustomException(ErrorCode.REQUEST_IN_PROGRESS);
         }
         if (isTerminalStatus(status)) {
-            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
+            throw new CustomException(ErrorCode.PAYMENT_ALREADY_PROCESSED);
         }
-        throw new CustomException(ErrorCode.BAD_REQUEST);
+        throw new CustomException(ErrorCode.PAYMENT_STATUS_NOT_PAYABLE);
     }
 
     private PrepareResponse toPrepareResponse(CoreEntity payment, CoreEntity.PaymentStatus status) {

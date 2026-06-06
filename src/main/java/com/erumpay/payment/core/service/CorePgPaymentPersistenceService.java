@@ -48,7 +48,7 @@ public class CorePgPaymentPersistenceService {
                 .created_at(LocalDateTime.now())
                 .build();
 
-        eventRepository.save(savedEvent);
+        saveEventOrThrow(savedEvent);
     }
 
     // [be] 다윤 260601 20:00 | 결제 성공 내역 원장 기록
@@ -72,18 +72,24 @@ public class CorePgPaymentPersistenceService {
                 .created_at(LocalDateTime.now())
                 .build();
 
-        eventRepository.save(savedEvent);
+        saveEventOrThrow(savedEvent);
     }
 
     // [be] 다윤 260601 20:00 | 결제 성공 카드 원장 기록
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public CardDetailEntity savePaidCardDetail(PaidCardRequest paidCard) {
         if (paidCard == null || paidCard.getPaymentId() == null || paidCard.getPgTxnId() == null) {
-            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PAYMENT_CARD_DETAIL_SAVE_FAILED);
         }
 
-        return cardDetailRepository.findByPaymentIdAndPgTxnId(paidCard.getPaymentId(), paidCard.getPgTxnId())
-                .orElseGet(() -> cardDetailRepository.save(toCardDetailEntity(paidCard)));
+        try {
+            return cardDetailRepository.findByPaymentIdAndPgTxnId(paidCard.getPaymentId(), paidCard.getPgTxnId())
+                    .orElseGet(() -> cardDetailRepository.save(toCardDetailEntity(paidCard)));
+        } catch (CustomException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new CustomException(ErrorCode.PAYMENT_CARD_DETAIL_SAVE_FAILED, e);
+        }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -137,7 +143,7 @@ public class CorePgPaymentPersistenceService {
                 .created_at(LocalDateTime.now())
                 .build();
 
-        eventRepository.save(savedEvent);
+        saveEventOrThrow(savedEvent);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -155,7 +161,7 @@ public class CorePgPaymentPersistenceService {
                 .created_at(LocalDateTime.now())
                 .build();
 
-        eventRepository.save(savedEvent);
+        saveEventOrThrow(savedEvent);
     }
 
     private String extractFailCode(PgAuthPayResponse pgResponse) {
@@ -168,6 +174,14 @@ public class CorePgPaymentPersistenceService {
             return failureCode;
         }
         return null;
+    }
+
+    private void saveEventOrThrow(EventEntity event) {
+        try {
+            eventRepository.save(event);
+        } catch (RuntimeException e) {
+            throw new CustomException(ErrorCode.PAYMENT_EVENT_SAVE_FAILED, e);
+        }
     }
 
     private CardDetailEntity findCardDetailOrThrow(Long paymentCardId) {
@@ -186,7 +200,7 @@ public class CorePgPaymentPersistenceService {
                 || paidCard.getPaidAmount() == null
                 || paidCard.getTotalBenefitAmount() == null
                 || paidCard.getPaidAt() == null) {
-            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+            throw new CustomException(ErrorCode.PAYMENT_CARD_DETAIL_SAVE_FAILED);
         }
 
         return CardDetailEntity.builder()
