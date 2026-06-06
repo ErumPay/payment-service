@@ -98,6 +98,8 @@ public enum ErrorCode {
                         "결제 이벤트 저장에 실패했습니다."),
         PAYMENT_CARD_DETAIL_SAVE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "PAY-CORE-903",
                         "PAYMENT_CARD_DETAIL_SAVE_FAILED", "결제 카드 내역 저장에 실패했습니다."),
+        PAYMENT_CANCEL_HISTORY_SAVE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "PAY-CORE-904",
+                        "PAYMENT_CANCEL_HISTORY_SAVE_FAILED", "결제 취소 이력 저장에 실패했습니다."),
 
         // QR: core에서 주문번호 생성과 QR 기반 결제 생성에 사용하는 QrService 의존성 오류.
         QR_INVALID(HttpStatus.BAD_REQUEST, "PAY-QR-001", "QR_INVALID_TOKEN", "QR 토큰을 확인해 주세요."),

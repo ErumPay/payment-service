@@ -58,6 +58,7 @@ import com.erumpay.payment.core.domain.dto.UserWithdrawalResponse;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity.CardStatus;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
+import com.erumpay.payment.core.domain.entity.EventEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateRequest;
@@ -159,6 +160,7 @@ public class CoreService {
 
         applyPrepareState(payment, normalizedIdempotencyKey, userId, paymentType, now);
         savePaymentWithDuplicateGuard(payment);
+        corePgPaymentPersistenceService.savePayPendingEvent(payment.getPaymentId(), EventEntity.ActorType.USER);
         createDutchHostSessionIfNeeded(request.getPaymentId(), userId, payment, paymentType);
         createRemoteDraftIfNeeded(userId, payment, paymentType, now);
 
@@ -251,6 +253,7 @@ public class CoreService {
 
         payment.connectRemoteRequest(remoteResponse.getRequest_id(), now);
         payment.payPendingStatusUpdatePayment(now);
+        corePgPaymentPersistenceService.savePayPendingEvent(payment.getPaymentId(), EventEntity.ActorType.USER);
 
         return finalizePrepare(payment, userId);
     }
@@ -338,17 +341,24 @@ public class CoreService {
 
         validateCancelableStatus(payment.getPayment_status());
         List<CardDetailEntity> cards = findCancelableCardsOrThrow(paymentId);
+        corePgPaymentPersistenceService.markCancelRequestedAndSaveEvent(paymentId, EventEntity.ActorType.USER);
         cancelCardsInPg(payment, paymentId, normalizedIdempotencyKey, cards);
 
         LocalDateTime canceledAt = LocalDateTime.now();
-        payment.voidedStatusUpdatePayment(canceledAt);
+
+        corePgPaymentPersistenceService.markCanceledAndSaveEvent(
+                paymentId,
+                EventEntity.ActorType.PG,
+                canceledAt,
+                resolveCanceledEventPgTxnId(cards),
+                payment.getPgGroupId());
         notifyCardPaymentCanceled(payment, cards, canceledAt);
         coreNotificationEventPublisher.publishPaymentCanceled(
                 payment.getUserId(),
                 payment.getPaymentId(),
                 payment.getOrder_name());
 
-        return toCanceledResponse(payment.getPaymentId(), payment.getPayment_status(), canceledAt);
+        return toCanceledResponse(payment.getPaymentId(), CoreEntity.PaymentStatus.CANCELED, canceledAt);
     }
 
     // [be] 다윤 260602 10:00 | 결제 내역 전체 조회
@@ -698,6 +708,7 @@ public class CoreService {
         CoreEntity payment = saveOutcome.getPayment();
         postSaveProcessor.process(payment);
         payment.payPendingStatusUpdatePayment(now);
+        corePgPaymentPersistenceService.savePayPendingEvent(payment.getPaymentId(), EventEntity.ActorType.USER);
 
         return finalizePrepare(payment, userId);
     }
@@ -808,8 +819,11 @@ public class CoreService {
             Long pgGroupId,
             List<CardDetailEntity> cards) {
         cards.forEach(card -> corePgPaymentPersistenceService.markCardCancelRequested(card.getPayment_card_id()));
+
+        corePgPaymentPersistenceService.saveCancelRequestedHistories(paymentId, pgGroupId, cards);
+        PgSplitPayResponse pgResponse = null;
         try {
-            PgSplitPayResponse pgResponse = requestPgSplitCancel(
+            pgResponse = requestPgSplitCancel(
                     payment,
                     paymentId,
                     normalizedIdempotencyKey,
@@ -817,7 +831,11 @@ public class CoreService {
             validatePgSplitCancelResponse(pgResponse);
             LocalDateTime canceledAt = LocalDateTime.now();
             corePgPaymentPersistenceService.markCardsCanceled(paymentCardIds(cards), canceledAt);
+
+            corePgPaymentPersistenceService.saveCanceledHistories(paymentId, cards, pgResponse, canceledAt);
         } catch (RuntimeException e) {
+
+            corePgPaymentPersistenceService.saveCancelFailedHistories(paymentId, pgGroupId, cards, pgResponse, e);
             markSplitCardCancelFailed(payment.getPaymentId(), cards, e);
             throw e;
         }
@@ -827,6 +845,13 @@ public class CoreService {
         return cards.stream()
                 .map(CardDetailEntity::getPayment_card_id)
                 .toList();
+    }
+
+    private Long resolveCanceledEventPgTxnId(List<CardDetailEntity> cards) {
+        if (cards == null || cards.size() != 1) {
+            return null;
+        }
+        return cards.get(0).getPg_txn_id();
     }
 
     private void markSplitCardCancelFailed(
@@ -856,12 +881,20 @@ public class CoreService {
             String normalizedIdempotencyKey,
             CardDetailEntity card) {
         corePgPaymentPersistenceService.markCardCancelRequested(card.getPayment_card_id());
+
+        corePgPaymentPersistenceService.saveCancelRequestedHistory(paymentId, card);
+        PgAuthPayResponse pgResponse = null;
         try {
-            PgAuthPayResponse pgResponse = requestPgCancel(payment, paymentId, normalizedIdempotencyKey, card);
+            pgResponse = requestPgCancel(payment, paymentId, normalizedIdempotencyKey, card);
             validatePgCancelResponse(pgResponse);
-            corePgPaymentPersistenceService.markCardCanceled(card.getPayment_card_id(), LocalDateTime.now());
+            LocalDateTime canceledAt = LocalDateTime.now();
+            corePgPaymentPersistenceService.markCardCanceled(card.getPayment_card_id(), canceledAt);
+
+            corePgPaymentPersistenceService.saveCanceledHistory(paymentId, card, pgResponse, canceledAt);
         } catch (RuntimeException e) {
             corePgPaymentPersistenceService.markCardCancelFailed(card.getPayment_card_id());
+
+            corePgPaymentPersistenceService.saveCancelFailedHistory(paymentId, card, pgResponse, e);
             throw e;
         }
     }
@@ -1021,7 +1054,8 @@ public class CoreService {
                     e,
                     ErrorCode.CARD_PAYMENT_RESULT_INVALID,
                     ErrorCode.CARD_PAYMENT_RESULT_SEND_FAILED);
-            log.error("card payment result notify failed. paymentId={}, userId={}, eventType={}, mappedError={}, body={}",
+            log.error(
+                    "card payment result notify failed. paymentId={}, userId={}, eventType={}, mappedError={}, body={}",
                     payment.getPaymentId(),
                     payment.getUserId(),
                     CARD_EVENT_CANCELED,
@@ -1158,6 +1192,8 @@ public class CoreService {
         try {
             CoreEntity payment = coreRepository.saveAndFlush(
                     createDutchPaymentEntity(userId, normalizedIdempotencyKey, request, now, dutchRole, paymentIntent));
+
+            corePgPaymentPersistenceService.saveCreatedEvent(payment.getPaymentId(), EventEntity.ActorType.USER);
             return DutchPaymentSaveOutcome.saved(payment);
         } catch (DataIntegrityViolationException e) {
             Optional<ResponseEntity<PrepareResponse>> replayed = findReplayedPrepareResponse(userId,
@@ -1205,6 +1241,8 @@ public class CoreService {
                     normalizedIdempotencyKey,
                     request,
                     now));
+
+            corePgPaymentPersistenceService.saveCreatedEvent(payment.getPaymentId(), EventEntity.ActorType.USER);
             return DutchPaymentSaveOutcome.saved(payment);
         } catch (DataIntegrityViolationException e) {
             if (!isDuplicateConstraintViolation(e)) {

@@ -95,6 +95,7 @@ public class CorePgPaymentService {
 
         Map<Long, CardBillingKeyResponse> billingKeys = fetchBillingKeysOrThrow(payment, request.getCards());
 
+        corePgPaymentPersistenceService.markPgPendingAndSaveEvent(payment.getPaymentId(), EventEntity.ActorType.SYSTEM);
         publishPendingEvent(payment.getPaymentId());
 
         List<ApprovedCardPayment> approvedPayments = requestApprovedCardPayments(
@@ -233,9 +234,9 @@ public class CorePgPaymentService {
                 failPaymentAfterPgFailure(
                         payment,
                         cardPgResponse,
-                    approvedPayments,
-                    savedIdempotencyKey,
-                    new CustomException(ErrorCode.PG_RESPONSE_INVALID));
+                        approvedPayments,
+                        savedIdempotencyKey,
+                        new CustomException(ErrorCode.PG_RESPONSE_INVALID));
             }
 
             String pgStatus = cardPgResponse.getStatus();
@@ -797,7 +798,8 @@ public class CorePgPaymentService {
                     e,
                     ErrorCode.CARD_PAYMENT_RESULT_INVALID,
                     ErrorCode.CARD_PAYMENT_RESULT_SEND_FAILED);
-            log.error("card payment result notify failed. paymentId={}, userId={}, eventType={}, mappedError={}, body={}",
+            log.error(
+                    "card payment result notify failed. paymentId={}, userId={}, eventType={}, mappedError={}, body={}",
                     payment.getPaymentId(),
                     payment.getUserId(),
                     CARD_EVENT_APPROVED,
