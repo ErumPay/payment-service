@@ -1,11 +1,13 @@
 package com.erumpay.payment.core.service;
 
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -75,6 +77,8 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Transactional
 public class CoreService {
+    private static final int MYSQL_DUPLICATE_ENTRY_ERROR_CODE = 1062;
+    private static final String POSTGRES_UNIQUE_VIOLATION_SQL_STATE = "23505";
     private static final String CARD_EVENT_CANCELED = "CANCELED";
     private static final String PG_STATUS_REJECTED = "REJECTED";
     private static final String PG_STATUS_CANCELLED = "CANCELLED";
@@ -1127,13 +1131,36 @@ public class CoreService {
                     now));
             return DutchPaymentSaveOutcome.saved(payment);
         } catch (DataIntegrityViolationException e) {
+            if (!isDuplicateConstraintViolation(e)) {
+                throw e;
+            }
             Optional<ResponseEntity<PrepareResponse>> replayed = findReplayedPrepareResponse(userId,
                     normalizedIdempotencyKey);
             if (replayed.isPresent()) {
                 return DutchPaymentSaveOutcome.replayed(replayed.get());
             }
-            throw new CustomException(ErrorCode.DUPLICATED_REQUEST);
+            throw new CustomException(ErrorCode.DUPLICATED_REQUEST, e);
         }
+    }
+
+    private boolean isDuplicateConstraintViolation(DataIntegrityViolationException exception) {
+        Throwable cause = exception.getMostSpecificCause();
+        if (cause instanceof SQLException sqlException) {
+            if (sqlException.getErrorCode() == MYSQL_DUPLICATE_ENTRY_ERROR_CODE
+                    || POSTGRES_UNIQUE_VIOLATION_SQL_STATE.equals(sqlException.getSQLState())) {
+                return true;
+            }
+        }
+
+        String message = cause == null ? exception.getMessage() : cause.getMessage();
+        if (message == null) {
+            return false;
+        }
+
+        String lowerMessage = message.toLowerCase(Locale.ROOT);
+        return lowerMessage.contains("duplicate")
+                || lowerMessage.contains("unique constraint")
+                || lowerMessage.contains("unique index");
     }
 
     private CoreEntity createRemoteDeputyPaymentEntity(

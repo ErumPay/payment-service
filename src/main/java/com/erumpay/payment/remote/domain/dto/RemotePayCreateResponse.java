@@ -9,11 +9,9 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.ToString;
 
 @Builder
 @Getter
-@ToString
 @AllArgsConstructor
 @NoArgsConstructor
 @Schema(description = "원격결제 요청 생성/조회/상태 변경 응답. request_id는 프론트와 Core가 원격결제 흐름을 추적하는 remoteRequestId로 사용한다.")
@@ -44,7 +42,8 @@ public class RemotePayCreateResponse {
     private LocalDateTime completed_at;
 
     // [be] 영은 260527 1010 | 요청 생성/조회/취소/거절 응답을 하나로 맞춰 프론트가 같은 모델로 화면을 갱신하게 한다.
-    // [be] 영은 260605 1600 | payment_id는 기존 응답 호환용 alias이고, 신규 연동은 source_payment_id/payer_payment_id를 구분해서 사용한다.
+    // [be] 영은 260605 1600 | payment_id는 기존 응답 호환용 alias이고, 신규 연동은
+    // source_payment_id/payer_payment_id를 구분해서 사용한다.
     public static RemotePayCreateResponse fromEntity(RemotePayRequestEntity request) {
         return RemotePayCreateResponse.builder()
                 .request_id(request.getRequest_id())
