@@ -17,4 +17,9 @@ public class PaymentNotificationEventMessage {
     private Long paymentId;
     private LocalDateTime occurredAt;
     private String correlationId;
+
+    public enum PaymentEventType {
+        PAYMENT_COMPLETED,
+        PAYMENT_CANCELED
+    }
 }

@@ -64,6 +64,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayCreateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRequest;
 import com.erumpay.payment.dutch.service.DutchPayService;
+import com.erumpay.payment.notification.service.CoreNotificationEventPublisher;
 import com.erumpay.payment.qr.service.QrService;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateResponse;
 import com.erumpay.payment.remote.domain.dto.RemotePayDraftCreateRequest;
@@ -124,6 +125,7 @@ public class CoreService {
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate stringRedisTemplate;
     private final PgFeignErrorMapper pgFeignErrorMapper;
+    private final CoreNotificationEventPublisher coreNotificationEventPublisher;
 
     @Value("${pg.authorization}")
     private String pgAuthorization;
@@ -277,8 +279,20 @@ public class CoreService {
 
         // REQUIRES_NEW 트랜잭션에서 커밋된 최종 결제 상태를 응답에 반영한다.
         entityManager.refresh(payment);
+        publishPaymentCompletedIfPaid(payment);
 
         return ResponseEntity.ok(toPinAndPayResponse(payment));
+    }
+
+    private void publishPaymentCompletedIfPaid(CoreEntity payment) {
+        if (payment.getPayment_status() != CoreEntity.PaymentStatus.PAID) {
+            return;
+        }
+
+        coreNotificationEventPublisher.publishPaymentCompleted(
+                payment.getUserId(),
+                payment.getPaymentId(),
+                payment.getOrder_name());
     }
 
     // [be] 다윤 260526 auth-service pin 인증 요청
@@ -329,6 +343,10 @@ public class CoreService {
         LocalDateTime canceledAt = LocalDateTime.now();
         payment.voidedStatusUpdatePayment(canceledAt);
         notifyCardPaymentCanceled(payment, cards, canceledAt);
+        coreNotificationEventPublisher.publishPaymentCanceled(
+                payment.getUserId(),
+                payment.getPaymentId(),
+                payment.getOrder_name());
 
         return toCanceledResponse(payment.getPaymentId(), payment.getPayment_status(), canceledAt);
     }
