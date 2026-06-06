@@ -47,6 +47,7 @@ public class QrService {
 
                 log.info("/qr/request Service");
                 log.debug("QR request: {}", request);
+                validateQrCreateRequest(request);
 
                 // order entity 생성
                 LocalDateTime now = LocalDateTime.now();
@@ -107,17 +108,21 @@ public class QrService {
                                                 + String.format("%0" + ORDER_RANDOM_DIGITS + "d", randomNumber))
                                 .filter(orderNo -> !coreRepository.existsByOrderNo(orderNo))
                                 .findFirst()
-                                .orElseThrow(() -> new IllegalStateException("Failed to generate unique order_no"));
+                                .orElseThrow(() -> new CustomException(ErrorCode.QR_ORDER_NO_GENERATION_FAILED));
         }
 
         public ResponseEntity<QrResponse> validateQR(QrValidateRequest request) {
                 log.info("/qr/validate Service");
 
+                if (request == null) {
+                        throw new CustomException(ErrorCode.QR_REQUEST_INVALID);
+                }
+
                 String token = request.getToken();
                 log.info("token={}", token);
 
                 if (token == null || token.isBlank()) {
-                        throw new CustomException(ErrorCode.QR_INVALID);
+                        throw new CustomException(ErrorCode.QR_TOKEN_REQUIRED);
                 }
 
                 QrEntity qr = qrRepository.findByToken(token)
@@ -135,5 +140,18 @@ public class QrService {
                 }
 
                 return ResponseEntity.ok(QrResponse.fromOrderEntity(qr.getOrder(), "VALID"));
+        }
+
+        private void validateQrCreateRequest(QrRequest request) {
+                if (request == null
+                                || request.getMerchant_id() == null
+                                || request.getAmount() == null
+                                || request.getAmount() <= 0
+                                || request.getOrder_name() == null
+                                || request.getOrder_name().isBlank()
+                                || request.getChannel_type() == null
+                                || request.getChannel_type().isBlank()) {
+                        throw new CustomException(ErrorCode.QR_REQUEST_INVALID);
+                }
         }
 }
