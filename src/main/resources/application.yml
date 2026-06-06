@@ -38,6 +38,22 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+  management:
+    endpoint:
+      health:
+        probes:
+          enabled: true
+    endpoints:
+      web:
+        exposure:
+          include: health
+    tracing:
+      sampling:
+        probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+    zipkin:
+      tracing:
+        endpoint: ${ZIPKIN_ENDPOINT:http://erumpay-zipkin.platform-operations.svc.cluster.local:9411/api/v2/spans%7D
+
 app:
   cors:
     allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:19000,http://localhost:5173,http://localhost:8080}

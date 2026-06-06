@@ -254,11 +254,12 @@ public enum ErrorCode {
 
         // AUTH: core 결제 비밀번호 검증에서 사용하는 AuthClient 의존성 오류.
         AUTH_REQUEST_INVALID(HttpStatus.BAD_REQUEST, "PAY-AUTH-001", "AUTH_REQUEST_INVALID", "인증 요청 값을 확인해 주세요."),
-        PIN_INVALID(HttpStatus.UNAUTHORIZED, "PAY-AUTH-101", "PIN_INVALID", "결제 비밀번호가 일치하지 않습니다."),
-        AUTH_ACCESS_DENIED(HttpStatus.FORBIDDEN, "PAY-AUTH-102", "AUTH_ACCESS_DENIED", "인증 서비스 접근 권한이 없습니다."),
-        PIN_LOCKED(HttpStatus.LOCKED, "PAY-AUTH-103", "PIN_LOCKED", "결제 비밀번호가 잠겼습니다."),
+        AUTH_ACCESS_DENIED(HttpStatus.FORBIDDEN, "PAY-AUTH-101", "AUTH_ACCESS_DENIED", "인증 서비스 접근 권한이 없습니다."),
+        PIN_VERIFY_FAILED(HttpStatus.UNAUTHORIZED, "PAY-AUTH-102", "PIN_VERIFY_FAILED", "PIN이 일치하지 않습니다."),
         PIN_NOT_SET(HttpStatus.NOT_FOUND, "PAY-AUTH-201", "PIN_NOT_SET", "결제 비밀번호가 설정되지 않았습니다."),
         AUTH_USER_NOT_FOUND(HttpStatus.NOT_FOUND, "PAY-AUTH-202", "AUTH_USER_NOT_FOUND", "사용자 인증 정보를 찾을 수 없습니다."),
+        PIN_LOCKED(HttpStatus.LOCKED, "PAY-AUTH-203", "PIN_LOCKED", "PIN 잠금 상태입니다."),
+        PIN_RESET_REQUIRED(HttpStatus.LOCKED, "PAY-AUTH-204", "PIN_RESET_REQUIRED", "PIN 재설정이 필요합니다."),
         INTERNAL_AUTH_SERVER_ERROR(HttpStatus.SERVICE_UNAVAILABLE, "PAY-AUTH-401", "AUTH_SERVICE_UNAVAILABLE",
                         "인증 서비스 연결에 실패했습니다."),
         AUTH_PIN_VERIFY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, "PAY-AUTH-402", "AUTH_PIN_VERIFY_FAILED",

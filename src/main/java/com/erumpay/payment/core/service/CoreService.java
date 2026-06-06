@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.erumpay.payment.core.client.auth.AuthClient;
+import com.erumpay.payment.core.client.auth.AuthFeignErrorMapper;
 import com.erumpay.payment.core.client.auth.dto.AuthPinRequest;
 import com.erumpay.payment.core.client.auth.dto.AuthPinResponse;
 import com.erumpay.payment.core.client.card.CardClient;
@@ -108,6 +109,7 @@ public class CoreService {
     private final CorePgPaymentService corePgPaymentService;
     private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
     private final AuthClient authClient;
+    private final AuthFeignErrorMapper authFeignErrorMapper;
     private final DutchPayService dutchPayService;
     private final QrService qrService;
     private final RemotePayService remotePayService;
@@ -288,27 +290,17 @@ public class CoreService {
             log.info("auth feign response : {}", res);
         } catch (FeignException e) {
             log.error("auth feign error. status={}, body={}", e.status(), e.contentUTF8());
-            throw new CustomException(mapAuthPinError(e.status()), e);
+            throw new CustomException(authFeignErrorMapper.mapVerifyPinError(e), e);
         }
 
         if (res == null) {
             throw new CustomException(ErrorCode.AUTH_RESPONSE_INVALID);
         }
         if (!res.isVerified()) {
-            throw new CustomException(ErrorCode.PIN_INVALID);
+            throw new CustomException(ErrorCode.PIN_VERIFY_FAILED);
         }
 
         return res;
-    }
-
-    private ErrorCode mapAuthPinError(int status) {
-        return switch (status) {
-            case 400 -> ErrorCode.AUTH_REQUEST_INVALID;
-            case 401 -> ErrorCode.PIN_INVALID;
-            case 404 -> ErrorCode.PIN_NOT_SET;
-            case 423 -> ErrorCode.PIN_LOCKED;
-            default -> ErrorCode.INTERNAL_AUTH_SERVER_ERROR;
-        };
     }
 
     // [be] 다윤 260527 일반 결제 취소

@@ -87,6 +87,9 @@ public class CoreValidationService {
         long total = 0L;
         Set<Long> cardIds = new HashSet<>();
         for (PinAndPayRequest.CardPortion card : request.getCards()) {
+            if (card == null) {
+                throw new CustomException(ErrorCode.PAYMENT_CARD_AMOUNT_INVALID);
+            }
             if (card.getCardId() == null || card.getAmount() == null || card.getAmount() <= 0) {
                 throw new CustomException(ErrorCode.PAYMENT_CARD_AMOUNT_INVALID);
             }
