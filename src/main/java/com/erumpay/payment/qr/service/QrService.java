@@ -14,8 +14,10 @@ import org.springframework.stereotype.Service;
 
 import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
+import com.erumpay.payment.core.domain.entity.EventEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
+import com.erumpay.payment.core.service.CorePgPaymentPersistenceService;
 import com.erumpay.payment.qr.dao.QrRepository;
 import com.erumpay.payment.qr.domain.dto.QrRequest;
 import com.erumpay.payment.qr.domain.dto.QrResponse;
@@ -38,6 +40,7 @@ public class QrService {
 
         private final QrRepository qrRepository;
         private final CoreRepository coreRepository;
+        private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
 
         @Value("${spring.qr.baseUrl}")
         private String qrBaseUrl;
@@ -60,6 +63,9 @@ public class QrService {
                                 request.getChannel_type(),
                                 now);
                 CoreEntity savedOrder = coreRepository.save(order);
+
+                corePgPaymentPersistenceService.saveCreatedEvent(savedOrder.getPaymentId(),
+                                EventEntity.ActorType.SYSTEM);
 
                 // 토큰 생성
                 String random = UUID.randomUUID()
