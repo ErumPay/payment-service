@@ -26,8 +26,10 @@ import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class CorePgPaymentPersistenceService {
 
@@ -264,7 +266,14 @@ public class CorePgPaymentPersistenceService {
                         .collect(Collectors.toMap(
                                 PgSplitPayResponse.Item::getOriginalTxnId,
                                 Function.identity(),
-                                (first, second) -> first));
+                                (first, second) -> {
+                                    log.warn(
+                                            "duplicate pg split cancel item found. originalTxnId={}, firstItem={}, secondItem={}. using second item",
+                                            first.getOriginalTxnId(),
+                                            summarizePgSplitItem(first),
+                                            summarizePgSplitItem(second));
+                                    return second;
+                                }));
 
         saveCancelHistoriesOrThrow(cardDetails.stream()
                 .map(cardDetail -> {
@@ -281,6 +290,31 @@ public class CorePgPaymentPersistenceService {
                             .build();
                 })
                 .toList());
+    }
+
+    private String summarizePgSplitItem(PgSplitPayResponse.Item item) {
+        if (item == null) {
+            return "null";
+        }
+
+        return "Item{pgTxnId=" + item.getPgTxnId()
+                + ", pgGroupId=" + item.getPgGroupId()
+                + ", splitSeq=" + item.getSplitSeq()
+                + ", originalTxnId=" + item.getOriginalTxnId()
+                + ", payPaymentId=" + item.getPayPaymentId()
+                + ", merchantId=" + item.getMerchantId()
+                + ", txnType=" + item.getTxnType()
+                + ", status=" + item.getStatus()
+                + ", amount=" + item.getAmount()
+                + ", pgApprovalNumber=" + item.getPgApprovalNumber()
+                + ", cardApprovalNumber=" + item.getCardApprovalNumber()
+                + ", rejectReason=" + item.getRejectReason()
+                + ", failureCode=" + item.getFailureCode()
+                + ", failureReason=" + item.getFailureReason()
+                + ", failureMessage=" + item.getFailureMessage()
+                + ", approvedAt=" + item.getApprovedAt()
+                + ", processedAt=" + item.getProcessedAt()
+                + "}";
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
