@@ -150,7 +150,7 @@ public class CoreSseService {
     }
 
     private void cacheMainCardEventIfNeeded(Long paymentId, CoreSseEventResponse event) {
-        if (paymentId == null || event == null || event.getEventType() != CoreSseEventType.MAIN_CARD_READY) {
+        if (paymentId == null || event == null || !isMainCardEvent(event.getEventType())) {
             return;
         }
 
@@ -219,6 +219,11 @@ public class CoreSseService {
     private boolean isRecommendationEvent(CoreSseEventType eventType) {
         return eventType == CoreSseEventType.RECOMMENDATION_SUCCEEDED
                 || eventType == CoreSseEventType.RECOMMENDATION_FAILED;
+    }
+
+    private boolean isMainCardEvent(CoreSseEventType eventType) {
+        return eventType == CoreSseEventType.MAIN_CARD_READY
+                || eventType == CoreSseEventType.MAIN_CARD_FAILED;
     }
 
     private boolean shouldCompleteSubscriptions(CoreSseEventResponse event) {

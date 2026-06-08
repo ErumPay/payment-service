@@ -171,7 +171,7 @@ public class CoreService {
         createRemoteDraftIfNeeded(userId, payment, paymentType, now);
 
         if (isDutchHostAuthOnly(payment)) {
-            publishMainCardIfPresent(payment.getPaymentId(), userId);
+            publishMainCardResult(payment.getPaymentId(), userId);
             return ResponseEntity.ok(toPrepareResponse(payment, RECOMMENDATION_STATUS_NOT_APPLICABLE));
         }
         if (paymentType == CoreEntity.PaymentType.REMOTE) {
@@ -783,9 +783,16 @@ public class CoreService {
         }
     }
 
-    private void publishMainCardIfPresent(Long paymentId, Long userId) {
+    private void publishMainCardResult(Long paymentId, Long userId) {
         MainCardResponse mainCard = getMainCardOrNull(userId);
         if (mainCard == null) {
+            coreSseService.publishPaymentUpdated(
+                    paymentId,
+                    CoreSseEventType.MAIN_CARD_FAILED,
+                    Map.of(
+                            "status", "MAIN_CARD_FAILED",
+                            "userId", userId,
+                            "reason", "주카드 조회에 실패했습니다."));
             return;
         }
 
@@ -829,8 +836,11 @@ public class CoreService {
         if (!isDutchHostAuthOnly(payment)) {
             return;
         }
-        if (request.getCards() == null || request.getCards().size() != 1) {
+        if (request.getCards() == null || request.getCards().isEmpty()) {
             throw new CustomException(ErrorCode.PAYMENT_CARD_LIST_REQUIRED);
+        }
+        if (request.getCards().size() > 1) {
+            throw new CustomException(ErrorCode.HOST_AUTH_ONLY_SINGLE_CARD_REQUIRED);
         }
     }
 
