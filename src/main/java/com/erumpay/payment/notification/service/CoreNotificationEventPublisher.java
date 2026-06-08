@@ -1,7 +1,6 @@
 package com.erumpay.payment.notification.service;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -11,6 +10,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import com.erumpay.payment.notification.dto.PaymentNotificationEventMessage;
 import com.erumpay.payment.notification.dto.PaymentNotificationEventMessage.PaymentEventType;
+import com.erumpay.payment.notification.dto.PaymentSettlementEventMessage;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -20,20 +20,20 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class CoreNotificationEventPublisher {
 
-    private static final DateTimeFormatter EVENT_ID_TIMESTAMP_FORMATTER = DateTimeFormatter
-            .ofPattern("yyyyMMddHHmmssSSS");
-
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final String paymentTopic;
+    private final String paymentSettlementTopic;
     private final ObjectMapper objectMapper;
 
     public CoreNotificationEventPublisher(
             KafkaTemplate<String, String> kafkaTemplate,
             ObjectMapper objectMapper,
-            @Value("${app.kafka.topics.payment-event:payment.event}") String paymentTopic) {
+            @Value("${app.kafka.topics.payment-event:payment.event}") String paymentTopic,
+            @Value("${app.kafka.topics.payment-settlement-event:payment.settlement.event}") String paymentSettlementTopic) {
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
         this.paymentTopic = paymentTopic;
+        this.paymentSettlementTopic = paymentSettlementTopic;
     }
 
     // [be] 다윤 260607 03:00 | 결제 완료 시 호출
@@ -65,7 +65,19 @@ public class CoreNotificationEventPublisher {
             return;
         }
 
-        Runnable sendTask = () -> send(event);
+        runAfterCommit(() -> send(event));
+    }
+
+    private void publishSettlement(PaymentSettlementEventMessage event) {
+        if (event == null || event.getMerchantId() == null) {
+            log.warn("Skip settlement Kafka publish because event or merchantId is null. event={}", event);
+            return;
+        }
+
+        runAfterCommit(() -> sendSettlement(event));
+    }
+
+    private void runAfterCommit(Runnable sendTask) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
@@ -124,6 +136,50 @@ public class CoreNotificationEventPublisher {
         }
     }
 
+    private void sendSettlement(PaymentSettlementEventMessage event) {
+        String key = event.getMerchantId().toString();
+        try {
+            String payload = objectMapper.writeValueAsString(event);
+            kafkaTemplate.send(paymentSettlementTopic, key, payload)
+                    .whenComplete((result, ex) -> {
+                        if (ex != null) {
+                            log.error(
+                                    "Settlement Kafka publish failed. topic={}, key={}, eventId={}, paymentId={}",
+                                    paymentSettlementTopic,
+                                    key,
+                                    event.getEventId(),
+                                    event.getPaymentId(),
+                                    ex);
+                            return;
+                        }
+
+                        log.info(
+                                "Settlement Kafka publish success. topic={}, key={}, partition={}, offset={}, eventId={}",
+                                result.getRecordMetadata().topic(),
+                                key,
+                                result.getRecordMetadata().partition(),
+                                result.getRecordMetadata().offset(),
+                                event.getEventId());
+                    });
+        } catch (JsonProcessingException e) {
+            log.error(
+                    "Settlement Kafka publish serialization failed. topic={}, key={}, eventId={}, paymentId={}",
+                    paymentSettlementTopic,
+                    key,
+                    event.getEventId(),
+                    event.getPaymentId(),
+                    e);
+        } catch (RuntimeException e) {
+            log.error(
+                    "Settlement Kafka publish invocation failed. topic={}, key={}, eventId={}, paymentId={}",
+                    paymentSettlementTopic,
+                    key,
+                    event.getEventId(),
+                    event.getPaymentId(),
+                    e);
+        }
+    }
+
     // [be] 다윤 260607 03:00 | 이벤트 객체 생성
     private void publishPaymentEvent(
             PaymentEventType eventType,
@@ -142,7 +198,7 @@ public class CoreNotificationEventPublisher {
 
         LocalDateTime occurredAt = LocalDateTime.now();
         PaymentNotificationEventMessage event = PaymentNotificationEventMessage.builder()
-                .eventId(createEventId(eventType, paymentId, userId, occurredAt))
+                .eventId(createEventId(eventType, paymentId, userId))
                 .eventType(eventType.name())
                 .userId(userId)
                 .title(title)
@@ -172,21 +228,78 @@ public class CoreNotificationEventPublisher {
     private String createEventId(
             PaymentEventType eventType,
             Long paymentId,
-            Long userId,
-            LocalDateTime occurredAt) {
+            Long userId) {
         String action = switch (eventType) {
             case PAYMENT_COMPLETED -> "completed";
             case PAYMENT_CANCELED -> "canceled";
+            case PAYMENT_SETTLEMENT_COMPLETED -> throw new IllegalArgumentException(
+                    "Settlement event type is not supported for user notification eventId: " + eventType);
         };
 
-        String timestamp = occurredAt.format(EVENT_ID_TIMESTAMP_FORMATTER);
-
         return String.format(
-                "payment:%s:%d:%d:%s",
+                "payment:%s:%d:%d",
                 action,
                 paymentId,
-                userId,
-                timestamp);
+                userId);
+    }
+
+    // [be] 다윤 260608 | 결제 완료 정산 이벤트 발행
+    public void publishPaymentSettlementCompleted(
+            Long merchantId,
+            Long paymentId,
+            Long amount) {
+        publishSettlementEvent(
+                PaymentEventType.PAYMENT_SETTLEMENT_COMPLETED,
+                merchantId,
+                paymentId,
+                amount);
+    }
+
+    private void publishSettlementEvent(
+            PaymentEventType eventType,
+            Long merchantId,
+            Long paymentId,
+            Long amount) {
+        if (merchantId == null || paymentId == null || amount == null) {
+            log.warn(
+                    "Skip settlement notification. eventType={}, merchantId={}, paymentId={}, amount={}",
+                    eventType,
+                    merchantId,
+                    paymentId,
+                    amount);
+            return;
+        }
+
+        LocalDateTime occurredAt = LocalDateTime.now();
+
+        PaymentSettlementEventMessage event = PaymentSettlementEventMessage.builder()
+                .eventId(createSettlementEventId(
+                        eventType,
+                        paymentId,
+                        merchantId))
+                .eventType(eventType.name())
+                .merchantId(merchantId)
+                .paymentId(paymentId)
+                .amount(amount)
+                .occurredAt(occurredAt)
+                .build();
+
+        publishSettlement(event);
+    }
+
+    private String createSettlementEventId(
+            PaymentEventType eventType,
+            Long paymentId,
+            Long merchantId) {
+        if (eventType != PaymentEventType.PAYMENT_SETTLEMENT_COMPLETED) {
+            throw new IllegalArgumentException("Unsupported settlement event type: " + eventType);
+        }
+
+        return String.format(
+                "payment:settlement:%s:%d:%d",
+                "completed",
+                paymentId,
+                merchantId);
     }
 
 }
