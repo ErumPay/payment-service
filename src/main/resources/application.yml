@@ -12,10 +12,15 @@ spring:
       client:
         config:
           merchantClient:
+            connectTimeout: ${MERCHANT_CLIENT_CONNECT_TIMEOUT:3000}
+            readTimeout: ${MERCHANT_CLIENT_READ_TIMEOUT:5000}
             retry:
               period: ${MERCHANT_CLIENT_RETRY_PERIOD:200}
               maxPeriod: ${MERCHANT_CLIENT_RETRY_MAX_PERIOD:1000}
               maxAttempts: ${MERCHANT_CLIENT_RETRY_MAX_ATTEMPTS:3}
+          recommendClient:
+            connectTimeout: ${RECOMMEND_CLIENT_CONNECT_TIMEOUT:3000}
+            readTimeout: ${RECOMMEND_CLIENT_READ_TIMEOUT:5000}
 
   datasource:
     url: ${DB_URL}
@@ -120,3 +125,30 @@ resilience4j:
         minimumNumberOfCalls: 5
         failureRateThreshold: 50
         waitDurationInOpenState: 10s
+      recommendClient:
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+      RecommendClientrecommentListRequestRecommendRequest:
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: ${RESILIENCE4J_TIME_LIMITER_TIMEOUT:5s}
+        cancelRunningFuture: true
+    instances:
+      merchantClient:
+        timeoutDuration: ${MERCHANT_CLIENT_TIME_LIMITER_TIMEOUT:5s}
+        cancelRunningFuture: true
+      recommendClient:
+        timeoutDuration: ${RECOMMEND_CLIENT_TIME_LIMITER_TIMEOUT:5s}
+        cancelRunningFuture: true
+      RecommendClientrecommentListRequestRecommendRequest:
+        timeoutDuration: ${RECOMMEND_CLIENT_TIME_LIMITER_TIMEOUT:5s}
+        cancelRunningFuture: true

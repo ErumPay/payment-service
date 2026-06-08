@@ -66,6 +66,7 @@ public class QrService {
                                 request.getChannel_type(),
                                 now);
                 MerchantResponse merchant = merchantClient.merchantInfoRequest(request.getMerchant_id());
+                validateMerchantInfo(merchant);
                 order.updateMerchantInfo(
                                 merchant.getMerchantName(),
                                 merchant.getBusinessNumber(),
@@ -184,6 +185,16 @@ public class QrService {
                                 || request.getChannel_type() == null
                                 || request.getChannel_type().isBlank()) {
                         throw new CustomException(ErrorCode.QR_REQUEST_INVALID);
+                }
+        }
+
+        private void validateMerchantInfo(MerchantResponse merchant) {
+                if (merchant == null
+                                || merchant.getMerchantName() == null
+                                || merchant.getMerchantName().isBlank()
+                                || merchant.getMccCode() == null
+                                || merchant.getMccCode().isBlank()) {
+                        throw new CustomException(ErrorCode.MERCHANT_AUTH_UNAVAILABLE);
                 }
         }
 }

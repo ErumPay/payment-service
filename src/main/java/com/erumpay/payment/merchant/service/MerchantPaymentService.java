@@ -18,6 +18,8 @@ import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.core.service.CoreValidationService;
+import com.erumpay.payment.merchant.client.MerchantClient;
+import com.erumpay.payment.merchant.client.dto.MerchantResponse;
 import com.erumpay.payment.merchant.domain.dto.MerchantCancelResponse;
 import com.erumpay.payment.merchant.domain.dto.MerchantPaymentRequest;
 import com.erumpay.payment.merchant.domain.dto.MerchantPaymentResponse;
@@ -41,6 +43,7 @@ public class MerchantPaymentService {
     private final QrService qrService;
     private final CoreValidationService coreValidationService;
     private final PgClient pgClient;
+    private final MerchantClient merchantClient;
 
     @Value("${checkout.redirect-base-url}")
     private String checkoutRedirectBaseUrl;
@@ -163,11 +166,32 @@ public class MerchantPaymentService {
                 .updatedAt(now)
                 .build();
 
+        MerchantResponse merchant = merchantClient.merchantInfoRequest(merchantId);
+        validateMerchantInfo(merchant);
+        payment.updateMerchantInfo(
+                merchant.getMerchantName(),
+                merchant.getBusinessNumber(),
+                merchant.getOwnerName(),
+                merchant.getContactPhone(),
+                merchant.getBusinessAddress(),
+                merchant.getMccCode(),
+                now);
+
         CoreEntity savedPayment = coreRepository.saveAndFlush(payment);
         String token = UUID.randomUUID().toString().replace("-", "");
         qrRepository.save(QrEntity.toEntity(savedPayment, token, now, now.plusMinutes(10)));
 
         return MerchantPaymentResponse.from(savedPayment, checkoutRedirectBaseUrl + token, token);
+    }
+
+    private void validateMerchantInfo(MerchantResponse merchant) {
+        if (merchant == null
+                || merchant.getMerchantName() == null
+                || merchant.getMerchantName().isBlank()
+                || merchant.getMccCode() == null
+                || merchant.getMccCode().isBlank()) {
+            throw new CustomException(ErrorCode.MERCHANT_AUTH_UNAVAILABLE);
+        }
     }
 
     // [be] 나영은 260529 1638 | 재조회/멱등 응답에서도 결제창 진입 정보가 유지되도록 QR 토큰을 다시 조립한다.
