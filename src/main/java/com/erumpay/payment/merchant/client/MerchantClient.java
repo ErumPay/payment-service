@@ -10,7 +10,11 @@ import com.erumpay.payment.merchant.client.dto.ApiKeyValidationRequest;
 import com.erumpay.payment.merchant.client.dto.ApiKeyValidationResponse;
 import com.erumpay.payment.merchant.client.dto.MerchantResponse;
 
-@FeignClient(name = "merchantClient", url = "${merchant.base-url}")
+@FeignClient(
+        name = "merchantClient",
+        url = "${merchant.base-url}",
+        configuration = MerchantClientFeignConfig.class,
+        fallback = MerchantClientFallback.class)
 public interface MerchantClient {
 
     @PostMapping(value = "/internal/v1/merchants/api-key/validate", consumes = "application/json")
