@@ -29,6 +29,8 @@ public enum ErrorCode {
         PAYMENT_PIN_REQUIRED(HttpStatus.BAD_REQUEST, "PAY-CORE-014", "PAYMENT_PIN_REQUIRED", "결제 비밀번호를 입력해 주세요."),
         PAYMENT_CARD_LIST_REQUIRED(HttpStatus.BAD_REQUEST, "PAY-CORE-015", "PAYMENT_CARD_LIST_REQUIRED",
                         "결제할 카드를 1개 이상 선택해 주세요."),
+        HOST_AUTH_ONLY_SINGLE_CARD_REQUIRED(HttpStatus.BAD_REQUEST, "PAY-CORE-020", "HOST_AUTH_ONLY_SINGLE_CARD_REQUIRED",
+                        "대표자 가승인 결제는 카드 1개만 선택할 수 있습니다."),
         REQUEST_PARAMETER_INVALID(HttpStatus.BAD_REQUEST, "PAY-CORE-017", "REQUEST_PARAMETER_INVALID",
                         "요청 파라미터를 확인해 주세요."),
         REQUEST_HEADER_REQUIRED(HttpStatus.BAD_REQUEST, "PAY-CORE-018", "REQUEST_HEADER_REQUIRED",
