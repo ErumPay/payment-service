@@ -64,6 +64,7 @@ public class CorePgPaymentService {
     private static final String HOST_AUTH_STATUS_AUTHORIZED = "AUTHORIZED";
     private static final String HOST_AUTH_STATUS_FAILED = "FAILED";
     private static final String PARTICIPANT_PAYMENT_STATUS_PAID = "PAID";
+    private static final String PARTICIPANT_PAYMENT_STATUS_FAILED = "FAILED";
     private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
 
     private final PgClient pgClient;
@@ -345,6 +346,7 @@ public class CorePgPaymentService {
             RuntimeException exception) {
         compensateApprovedPayments(payment, approvedPayments, savedIdempotencyKey);
         markPaymentFailed(payment, pgResponse);
+        notifyParticipantPaymentResultIfNeeded(payment, PARTICIPANT_PAYMENT_STATUS_FAILED, pgResponse);
         publishFailedEvent(payment.getPaymentId());
         throw exception;
     }

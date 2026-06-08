@@ -68,6 +68,8 @@ public class DutchPayService {
     private static final Duration TIMEOUT_AFTER = Duration.ofMinutes(30);
     private static final String INVITE_TOKEN_HMAC_ALGORITHM = "HmacSHA256";
     private static final String DEFAULT_INVITE_TOKEN_SECRET = "erumpay-local-dutch-invite-token-secret";
+    private static final String PARTICIPANT_PAYMENT_STATUS_PAID = "PAID";
+    private static final String PARTICIPANT_PAYMENT_STATUS_FAILED = "FAILED";
 
     private final DutchPaySessionRepository dutchPaySessionRepository;
     private final DutchPayParticipantRepository dutchPayParticipantRepository;
@@ -235,20 +237,34 @@ public class DutchPayService {
             throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
         }
 
+        LocalDateTime now = LocalDateTime.now();
+        boolean paidResult = isParticipantPaymentPaid(request.getStatus());
+
         try {
-            participant.completePayment(request.getPayment_id(), LocalDateTime.now());
+            if (paidResult) {
+                participant.completePayment(request.getPayment_id(), now);
+            } else if (isParticipantPaymentFailed(request.getStatus())) {
+                participant.failPayment(request.getPayment_id(), now);
+            } else {
+                throw new IllegalArgumentException("Unsupported participant payment status");
+            }
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw toParticipantPaymentException(e);
         }
 
         List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
+        if (!paidResult) {
+            recalculateHostFinalAmount(session, participants, now);
+        }
         boolean allMembersPaid = allPayableMembersPaid(session, participants);
 
         return publishAndReturn(
                 sessionId,
                 allMembersPaid
                         ? "HOST_FINAL_PAYMENT_REQUIRED"
-                        : "PARTICIPANT_PAYMENT_PAID");
+                        : paidResult
+                                ? "PARTICIPANT_PAYMENT_PAID"
+                                : "PARTICIPANT_PAYMENT_FAILED");
     }
 
     // [be] 영은 260601 | Core가 대표자 최종 결제 완료를 알려주면 대표자 결제 상태와 세션 완료를 확정한다.
@@ -360,9 +376,11 @@ public class DutchPayService {
     }
 
     // [be] 영은 260523 1120 | 대표자/참여자가 알림 클릭 또는 화면 복원 시 최신 세션 상태를 조회한다
-    @Transactional(readOnly = true)
+    @Transactional
     public DutchPaySessionDetailResponse getSession(Long userId, Long sessionId) {
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        handleTimeoutOnReadIfExpired(session, LocalDateTime.now());
+
         List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
         ensureSessionMember(session, participants, userId);
 
@@ -370,9 +388,11 @@ public class DutchPayService {
     }
 
     // [be] 영은 260523 1120 | 참여자가 결제 화면에 진입할 때 본인 participant_id와 부담 금액을 조회한다
-    @Transactional(readOnly = true)
+    @Transactional
     public DutchPayMyPaymentResponse getMyPayment(Long userId, Long sessionId) {
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        handleTimeoutOnReadIfExpired(session, LocalDateTime.now());
+
         List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
         ensureSessionMember(session, participants, userId);
 
@@ -385,15 +405,21 @@ public class DutchPayService {
     }
 
     // [be] 영은 260523 1120 | 홈 화면 진행 중 더치페이 목록 조회에 사용한다
-    @Transactional(readOnly = true)
+    @Transactional
     public List<DutchPaySessionDetailResponse> getActiveSessions(Long userId) {
         if (userId == null) {
             throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
 
+        LocalDateTime now = LocalDateTime.now();
         return dutchPaySessionRepository.findActiveSessionsByUserId(
                 userId,
-                List.of(DutchPayStatus.CREATED, DutchPayStatus.IN_PROGRESS, DutchPayStatus.TIMEOUT_HANDLED)).stream()
+                List.of(DutchPayStatus.CREATED, DutchPayStatus.IN_PROGRESS)).stream()
+                .map(session -> {
+                    handleTimeoutOnReadIfExpired(session, now);
+                    return session;
+                })
+                .filter(session -> session.getStatus() != DutchPayStatus.TIMEOUT_HANDLED)
                 .map(session -> DutchPaySessionDetailResponse.fromEntity(
                         session,
                         getParticipants(session.getSession_id())))
@@ -623,6 +649,17 @@ public class DutchPayService {
                 .build();
     }
 
+    // [be] 조보름 260607 1010 | 사용자가 화면 조회 중이면 배치 대기 없이 만료된 더치페이를 즉시 타임아웃 처리한다
+    private void handleTimeoutOnReadIfExpired(DutchPaySessionEntity session, LocalDateTime now) {
+        if (session.getStatus() != DutchPayStatus.IN_PROGRESS || session.getCreated_at() == null) {
+            return;
+        }
+
+        if (!session.getCreated_at().plus(TIMEOUT_AFTER).isAfter(now)) {
+            handleTimedOutSession(session, now);
+        }
+    }
+
     // [be] 영은 260523 1120 | 대표자 가승인 결과 콜백의 세션/결제 식별자를 검증한다
     private void validateHostAuthorizationResultRequest(
             Long sessionId,
@@ -659,8 +696,8 @@ public class DutchPayService {
                 || request.getPayment_id() == null
                 || request.getStatus() == null
                 || request.getStatus().isBlank()
-                || (!"PAID".equalsIgnoreCase(request.getStatus())
-                && !"APPROVED".equalsIgnoreCase(request.getStatus()))) {
+                || (!isParticipantPaymentPaid(request.getStatus())
+                && !isParticipantPaymentFailed(request.getStatus()))) {
             throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
     }
@@ -905,6 +942,31 @@ public class DutchPayService {
         host.assignAmount(session.getTotal_amount() - memberAmountSum, now);
     }
 
+    // [be] 조보름 260607 1045 | 참여자 결제 실패/타임아웃 후 성공 결제액을 제외한 잔액을 대표자 부담금으로 반영한다
+    private long recalculateHostFinalAmount(
+            DutchPaySessionEntity session,
+            List<DutchPayParticipantEntity> participants,
+            LocalDateTime now) {
+        DutchPayParticipantEntity host = participants.stream()
+                .filter(participant -> participant.getUser_id().equals(session.getHost_user_id()))
+                .findFirst()
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
+
+        long paidMemberAmount = participants.stream()
+                .filter(participant -> !participant.getUser_id().equals(session.getHost_user_id()))
+                .filter(participant -> participant.getStatus() == ParticipantStatus.PAID)
+                .map(DutchPayParticipantEntity::getAmount)
+                .filter(amount -> amount != null)
+                .reduce(0L, Long::sum);
+        long hostFinalAmount = session.getTotal_amount() - paidMemberAmount;
+        if (hostFinalAmount < 0) {
+            throw new CustomException(ErrorCode.DUTCH_AMOUNT_MISMATCH);
+        }
+
+        host.assignAmount(hostFinalAmount, now);
+        return hostFinalAmount;
+    }
+
     // [be] 영은 260526 1620 | 대표자를 제외한 실제 부담 참여자가 모두 PAID인지 확인한다
     private boolean allPayableMembersPaid(
             DutchPaySessionEntity session,
@@ -913,6 +975,15 @@ public class DutchPayService {
                 .filter(participant -> !participant.getUser_id().equals(session.getHost_user_id()))
                 .filter(participant -> participant.getStatus() != ParticipantStatus.REJECTED)
                 .allMatch(participant -> participant.getStatus() == ParticipantStatus.PAID);
+    }
+
+    private boolean isParticipantPaymentPaid(String status) {
+        return PARTICIPANT_PAYMENT_STATUS_PAID.equalsIgnoreCase(status)
+                || "APPROVED".equalsIgnoreCase(status);
+    }
+
+    private boolean isParticipantPaymentFailed(String status) {
+        return PARTICIPANT_PAYMENT_STATUS_FAILED.equalsIgnoreCase(status);
     }
 
     // [be] 영은 260523 1120 | 초대 링크 토큰의 형식, 서명, 만료 시간을 검증하고 session_id를 추출한다

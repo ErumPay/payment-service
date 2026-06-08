@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
+import com.erumpay.payment.core.domain.entity.CoreEntity.PaymentStatus;
 import com.erumpay.payment.core.domain.entity.EventEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -141,11 +142,25 @@ public class QrService {
                 if (qr.is_used()) {
                         throw new CustomException(ErrorCode.QR_USED);
                 }
+                // [be] 조보름 260607 0338 | 이미 결제 처리된 QR 재스캔 시 프론트가 카드 선택 화면으로 진입하지 않도록 검증 단계에서 차단합니다.
+                if (isProcessedPayment(qr.getOrder().getPayment_status())) {
+                        throw new CustomException(ErrorCode.PAYMENT_ALREADY_PROCESSED);
+                }
                 if (now.isAfter(qr.getExpired_at())) {
                         throw new CustomException(ErrorCode.QR_EXPIRED);
                 }
 
                 return ResponseEntity.ok(QrResponse.fromOrderEntity(qr.getOrder(), "VALID"));
+        }
+
+        // [be] 조보름 260607 0338 | QR 사용 여부와 별개로 결제 주문 상태가 완료/취소/실패/만료된 경우 재결제 플로우를 막기 위한 상태 판별 함수입니다.
+        private boolean isProcessedPayment(PaymentStatus status) {
+                return status == PaymentStatus.PAID
+                                || status == PaymentStatus.AUTHORIZED
+                                || status == PaymentStatus.VOIDED
+                                || status == PaymentStatus.CANCELED
+                                || status == PaymentStatus.FAILED
+                                || status == PaymentStatus.EXPIRED;
         }
 
         private void validateQrCreateRequest(QrRequest request) {

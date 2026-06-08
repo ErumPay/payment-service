@@ -46,6 +46,7 @@ public class RecommendResponse {
         private Long cardProductId;
         private String cardCompany;
         private String cardName;
+        private String imageUrl;
         private String maskedNumber;
         private Long approvedAmount;
         private Long amount;

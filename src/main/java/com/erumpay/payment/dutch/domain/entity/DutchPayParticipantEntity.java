@@ -202,6 +202,28 @@ public class DutchPayParticipantEntity {
         this.updated_at = now;
     }
 
+    // [be] 조보름 260607 1045 | 참여자 결제 실패 시 실패 금액을 보존한 채 대표자 부담금 재계산 대상으로 전환한다
+    public void failPayment(Long paymentId, LocalDateTime now) {
+        validateNow(now);
+
+        if (paymentId == null) {
+            throw new IllegalArgumentException("paymentId must not be null");
+        }
+        if (this.status == ParticipantStatus.REJECTED) {
+            return;
+        }
+        if (this.status != ParticipantStatus.PENDING) {
+            throw new IllegalStateException("Only pending participant payment can be failed");
+        }
+        if (this.payment == null || !this.payment.getPaymentId().equals(paymentId)) {
+            throw new IllegalStateException("Participant payment does not match");
+        }
+
+        this.status = ParticipantStatus.REJECTED;
+        this.paid_at = null;
+        this.updated_at = now;
+    }
+
     // [be] 영은 260601 | 대표자 최종 부담금 결제가 완료되면 대표자 참여자 row를 HOST_PAID로 전환한다.
     public void completeHostFinalPayment(CoreEntity payment, LocalDateTime now) {
         validateNow(now);

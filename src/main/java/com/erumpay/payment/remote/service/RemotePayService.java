@@ -174,7 +174,8 @@ public class RemotePayService {
 
         return remotePayRequestRepository.findRequestsByUserIdAndStatuses(
                 userId,
-                List.of(RemotePayStatus.DRAFT, RemotePayStatus.PENDING))
+                List.of(RemotePayStatus.DRAFT, RemotePayStatus.PENDING),
+                LocalDateTime.now())
                 .stream()
                 .map(RemotePayCreateResponse::fromEntity)
                 .toList();
