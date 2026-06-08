@@ -95,6 +95,7 @@ public class CoreService {
     private static final String PG_ERROR_ALREADY_CANCELLED = "PAYMENT_ALREADY_CANCELLED";
     private static final String SPLIT_CANCEL_REASON = "사용자 요청으로 분할결제 전체 취소";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
+    private static final String RECOMMENDATION_STATUS_NOT_APPLICABLE = "NOT_APPLICABLE";
     private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
     private static final Duration RECOMMENDATION_CACHE_TTL = Duration.ofMinutes(30);
     private static final ZoneId PAYMENT_HISTORY_BUSINESS_ZONE = ZoneId.of("Asia/Seoul");
@@ -169,7 +170,7 @@ public class CoreService {
         createRemoteDraftIfNeeded(userId, payment, paymentType, now);
 
         if (paymentType == CoreEntity.PaymentType.REMOTE) {
-            return ResponseEntity.ok(toPrepareResponse(payment));
+            return ResponseEntity.ok(toPrepareResponse(payment, RECOMMENDATION_STATUS_NOT_APPLICABLE));
         }
         return finalizePrepare(payment, userId);
     }
@@ -1176,10 +1177,14 @@ public class CoreService {
     }
 
     private PrepareResponse toPrepareResponse(CoreEntity payment) {
+        return toPrepareResponse(payment, RECOMMENDATION_STATUS_PENDING);
+    }
+
+    private PrepareResponse toPrepareResponse(CoreEntity payment, String recommendationStatus) {
         return PrepareResponse.builder()
                 .paymentId(payment.getPaymentId())
                 .paymentStatus(payment.getPayment_status() == null ? null : payment.getPayment_status().name())
-                .recommendationStatus(RECOMMENDATION_STATUS_PENDING)
+                .recommendationStatus(recommendationStatus)
                 .paymentType(payment.getPayment_type() == null ? null : payment.getPayment_type().name())
                 .paymentIntent(payment.getPayment_intent() == null ? null : payment.getPayment_intent().name())
                 .dutchRole(payment.getDutch_role() == null ? null : payment.getDutch_role().name())
