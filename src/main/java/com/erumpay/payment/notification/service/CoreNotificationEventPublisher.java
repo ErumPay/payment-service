@@ -41,7 +41,7 @@ public class CoreNotificationEventPublisher {
             Long userId, Long paymentId, String orderName) {
         publishPaymentEvent(
                 PaymentEventType.PAYMENT_COMPLETED,
-                "결제 완료되었습니다.",
+                "결제 완료",
                 userId,
                 paymentId,
                 buildPaymentCompletedContent(orderName));
@@ -52,7 +52,7 @@ public class CoreNotificationEventPublisher {
             Long userId, Long paymentId, String orderName) {
         publishPaymentEvent(
                 PaymentEventType.PAYMENT_CANCELED,
-                "결제 취소되었습니다.",
+                "결제 취소",
                 userId,
                 paymentId,
                 buildPaymentCanceledContent(orderName));

@@ -19,6 +19,7 @@ import com.erumpay.payment.core.domain.entity.EventEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
 import com.erumpay.payment.core.service.CorePgPaymentPersistenceService;
+import com.erumpay.payment.merchant.client.dto.MerchantResponse;
 import com.erumpay.payment.qr.dao.QrRepository;
 import com.erumpay.payment.qr.domain.dto.QrRequest;
 import com.erumpay.payment.qr.domain.dto.QrResponse;
@@ -42,6 +43,7 @@ public class QrService {
         private final QrRepository qrRepository;
         private final CoreRepository coreRepository;
         private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
+        private final com.erumpay.payment.merchant.client.MerchantClient merchantClient;
 
         @Value("${spring.qr.baseUrl}")
         private String qrBaseUrl;
@@ -62,6 +64,15 @@ public class QrService {
                                 request.getAmount(),
                                 request.getMerchant_id(),
                                 request.getChannel_type(),
+                                now);
+                MerchantResponse merchant = merchantClient.merchantInfoRequest(request.getMerchant_id());
+                order.updateMerchantInfo(
+                                merchant.getMerchantName(),
+                                merchant.getBusinessNumber(),
+                                merchant.getOwnerName(),
+                                merchant.getContactPhone(),
+                                merchant.getBusinessAddress(),
+                                merchant.getMccCode(),
                                 now);
                 CoreEntity savedOrder = coreRepository.save(order);
 

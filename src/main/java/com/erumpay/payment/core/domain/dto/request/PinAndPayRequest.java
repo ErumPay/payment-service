@@ -1,4 +1,4 @@
-package com.erumpay.payment.core.domain.dto;
+package com.erumpay.payment.core.domain.dto.request;
 
 import java.util.List;
 
@@ -33,9 +33,7 @@ public class PinAndPayRequest {
     private Long totalAmount;
 
     @NotBlank
-    @Pattern(
-            regexp = "^(BENEFIT_SINGLE|PERF_SINGLE|BENEFIT_SPLIT|PERF_SPLIT)$",
-            message = "strategyType must be one of BENEFIT_SINGLE, PERF_SINGLE, BENEFIT_SPLIT, PERF_SPLIT")
+    @Pattern(regexp = "^(BENEFIT_SINGLE|PERF_SINGLE|BENEFIT_SPLIT|PERF_SPLIT)$", message = "strategyType must be one of BENEFIT_SINGLE, PERF_SINGLE, BENEFIT_SPLIT, PERF_SPLIT")
     @Schema(description = "선택한 추천 전략", example = "BENEFIT_SINGLE", allowableValues = {
             "BENEFIT_SINGLE",
             "PERF_SINGLE",
