@@ -62,7 +62,25 @@ class CoreNotificationEventPublisherTest {
         assertThat(payload.get("merchantId").asLong()).isEqualTo(7L);
         assertThat(payload.get("paymentId").asLong()).isEqualTo(101L);
         assertThat(payload.get("amount").asLong()).isEqualTo(25000L);
-        assertThat(payload.get("eventId").asText()).startsWith("payment:settlement:completed:101:7:");
+        assertThat(payload.get("eventId").asText()).isEqualTo("payment:settlement:completed:101:7");
+        assertThat(payload.hasNonNull("occurredAt")).isTrue();
+    }
+
+    @Test
+    void publishPaymentCompletedUsesDeterministicEventId() throws Exception {
+        when(kafkaTemplate.send(eq(PAYMENT_TOPIC), eq("9"), anyString()))
+                .thenReturn(CompletableFuture.completedFuture(sendResult(PAYMENT_TOPIC, "9", "{}")));
+
+        publisher.publishPaymentCompleted(9L, 202L, "테스트 주문");
+
+        ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
+        verify(kafkaTemplate).send(eq(PAYMENT_TOPIC), eq("9"), payloadCaptor.capture());
+
+        JsonNode payload = objectMapper.readTree(payloadCaptor.getValue());
+        assertThat(payload.get("eventType").asText()).isEqualTo("PAYMENT_COMPLETED");
+        assertThat(payload.get("userId").asLong()).isEqualTo(9L);
+        assertThat(payload.get("paymentId").asLong()).isEqualTo(202L);
+        assertThat(payload.get("eventId").asText()).isEqualTo("payment:completed:202:9");
         assertThat(payload.hasNonNull("occurredAt")).isTrue();
     }
 

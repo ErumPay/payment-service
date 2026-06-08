@@ -1,7 +1,6 @@
 package com.erumpay.payment.notification.service;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -20,9 +19,6 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class CoreNotificationEventPublisher {
-
-    private static final DateTimeFormatter EVENT_ID_TIMESTAMP_FORMATTER = DateTimeFormatter
-            .ofPattern("yyyyMMddHHmmssSSS");
 
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final String paymentTopic;
@@ -202,7 +198,7 @@ public class CoreNotificationEventPublisher {
 
         LocalDateTime occurredAt = LocalDateTime.now();
         PaymentNotificationEventMessage event = PaymentNotificationEventMessage.builder()
-                .eventId(createEventId(eventType, paymentId, userId, occurredAt))
+                .eventId(createEventId(eventType, paymentId, userId))
                 .eventType(eventType.name())
                 .userId(userId)
                 .title(title)
@@ -232,8 +228,7 @@ public class CoreNotificationEventPublisher {
     private String createEventId(
             PaymentEventType eventType,
             Long paymentId,
-            Long userId,
-            LocalDateTime occurredAt) {
+            Long userId) {
         String action = switch (eventType) {
             case PAYMENT_COMPLETED -> "completed";
             case PAYMENT_CANCELED -> "canceled";
@@ -241,14 +236,11 @@ public class CoreNotificationEventPublisher {
                     "Settlement event type is not supported for user notification eventId: " + eventType);
         };
 
-        String timestamp = occurredAt.format(EVENT_ID_TIMESTAMP_FORMATTER);
-
         return String.format(
-                "payment:%s:%d:%d:%s",
+                "payment:%s:%d:%d",
                 action,
                 paymentId,
-                userId,
-                timestamp);
+                userId);
     }
 
     // [be] 다윤 260608 | 결제 완료 정산 이벤트 발행
@@ -284,8 +276,7 @@ public class CoreNotificationEventPublisher {
                 .eventId(createSettlementEventId(
                         eventType,
                         paymentId,
-                        merchantId,
-                        occurredAt))
+                        merchantId))
                 .eventType(eventType.name())
                 .merchantId(merchantId)
                 .paymentId(paymentId)
@@ -299,20 +290,16 @@ public class CoreNotificationEventPublisher {
     private String createSettlementEventId(
             PaymentEventType eventType,
             Long paymentId,
-            Long merchantId,
-            LocalDateTime occurredAt) {
+            Long merchantId) {
         if (eventType != PaymentEventType.PAYMENT_SETTLEMENT_COMPLETED) {
             throw new IllegalArgumentException("Unsupported settlement event type: " + eventType);
         }
 
-        String timestamp = occurredAt.format(EVENT_ID_TIMESTAMP_FORMATTER);
-
         return String.format(
-                "payment:settlement:%s:%d:%d:%s",
+                "payment:settlement:%s:%d:%d",
                 "completed",
                 paymentId,
-                merchantId,
-                timestamp);
+                merchantId);
     }
 
 }
