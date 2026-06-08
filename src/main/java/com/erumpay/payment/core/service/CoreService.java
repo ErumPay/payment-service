@@ -29,6 +29,7 @@ import com.erumpay.payment.core.client.auth.dto.AuthPinRequest;
 import com.erumpay.payment.core.client.auth.dto.AuthPinResponse;
 import com.erumpay.payment.core.client.card.CardClient;
 import com.erumpay.payment.core.client.card.CardFeignErrorMapper;
+import com.erumpay.payment.core.client.card.dto.MainCardResponse;
 import com.erumpay.payment.core.client.card.dto.PaymentResultRequest;
 import com.erumpay.payment.core.client.card.dto.PaymentResultResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
@@ -169,6 +170,10 @@ public class CoreService {
         createDutchHostSessionIfNeeded(request.getPaymentId(), userId, payment, paymentType);
         createRemoteDraftIfNeeded(userId, payment, paymentType, now);
 
+        if (isDutchHostAuthOnly(payment)) {
+            publishMainCardIfPresent(payment.getPaymentId(), userId);
+            return ResponseEntity.ok(toPrepareResponse(payment, RECOMMENDATION_STATUS_NOT_APPLICABLE));
+        }
         if (paymentType == CoreEntity.PaymentType.REMOTE) {
             return ResponseEntity.ok(toPrepareResponse(payment, RECOMMENDATION_STATUS_NOT_APPLICABLE));
         }
@@ -753,6 +758,43 @@ public class CoreService {
         return ResponseEntity.ok(toPrepareResponse(payment));
     }
 
+    private boolean isDutchHostAuthOnly(CoreEntity payment) {
+        return payment.getPayment_type() == CoreEntity.PaymentType.DUTCH
+                && payment.getPayment_intent() == CoreEntity.PaymentIntent.DUTCH_HOST_AUTH_ONLY_PAY;
+    }
+
+    private MainCardResponse getMainCardOrNull(Long userId) {
+        try {
+            return cardClient.mainCardRequest(userId);
+        } catch (FeignException e) {
+            ErrorCode mappedError = cardFeignErrorMapper.map(
+                    e,
+                    ErrorCode.CARD_REQUEST_INVALID,
+                    ErrorCode.CARD_INTERNAL_SERVER_ERROR);
+            log.warn("main card lookup failed. userId={}, status={}, mappedError={}, body={}",
+                    userId,
+                    e.status(),
+                    mappedError.name(),
+                    e.contentUTF8());
+            return null;
+        } catch (RuntimeException e) {
+            log.warn("main card lookup failed unexpectedly. userId={}", userId, e);
+            return null;
+        }
+    }
+
+    private void publishMainCardIfPresent(Long paymentId, Long userId) {
+        MainCardResponse mainCard = getMainCardOrNull(userId);
+        if (mainCard == null) {
+            return;
+        }
+
+        coreSseService.publishPaymentUpdated(
+                paymentId,
+                CoreSseEventType.MAIN_CARD_READY,
+                mainCard);
+    }
+
     private void validatePayRequestPreconditions(
             CoreEntity payment,
             Long userId,
@@ -766,6 +808,7 @@ public class CoreService {
         }
         validateAmountMatches(payment.getAmount(), request.getTotalAmount());
         coreValidationService.validateCardAmounts(request);
+        validateHostAuthOnlyCardSelection(payment, request);
         validateRemotePaymentRequestIfNeeded(payment);
     }
 
@@ -779,6 +822,15 @@ public class CoreService {
     private void validateRemotePaymentRequestIfNeeded(CoreEntity payment) {
         if (payment.getPayment_type() == CoreEntity.PaymentType.REMOTE) {
             remotePayService.validatePaymentCanBeRequested(payment);
+        }
+    }
+
+    private void validateHostAuthOnlyCardSelection(CoreEntity payment, PinAndPayRequest request) {
+        if (!isDutchHostAuthOnly(payment)) {
+            return;
+        }
+        if (request.getCards() == null || request.getCards().size() != 1) {
+            throw new CustomException(ErrorCode.PAYMENT_CARD_LIST_REQUIRED);
         }
     }
 

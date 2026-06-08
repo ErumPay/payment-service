@@ -2,6 +2,7 @@ package com.erumpay.payment.core.domain.dto.sse;
 
 public enum CoreSseEventType {
     CONNECTED,
+    MAIN_CARD_READY,
     PAYMENT_PENDING,
     PG_PENDING,
     PAYMENT_FAILED,

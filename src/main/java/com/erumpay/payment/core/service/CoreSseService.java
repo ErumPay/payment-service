@@ -36,6 +36,7 @@ public class CoreSseService {
     private final CoreSseTopicProperties coreSseTopicProperties;
     private final Map<Long, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
     private final Map<Long, CachedRecommendationEvent> recommendationEvents = new ConcurrentHashMap<>();
+    private final Map<Long, CachedMainCardEvent> mainCardEvents = new ConcurrentHashMap<>();
 
     public SseEmitter subscribe(Long paymentId) {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
@@ -48,6 +49,7 @@ public class CoreSseService {
         emitter.onError(error -> removeEmitter(paymentId, emitter));
 
         sendConnectedEvent(emitter, paymentId);
+        replayCachedMainCardIfPresent(emitter, paymentId);
         replayCachedRecommendationIfPresent(emitter, paymentId);
         return emitter;
     }
@@ -93,6 +95,7 @@ public class CoreSseService {
     public void applyPaymentUpdatedFromRedis(Long paymentId, CoreSseEventResponse event) {
         // log.info("applyPaymentUpdatedFromRedis called.");
         cacheRecommendationEventIfNeeded(paymentId, event);
+        cacheMainCardEventIfNeeded(paymentId, event);
         sendLocalPaymentUpdated(paymentId, event);
 
         if (shouldCompleteSubscriptions(event)) {
@@ -146,6 +149,38 @@ public class CoreSseService {
         recommendationEvents.put(paymentId, new CachedRecommendationEvent(event, System.currentTimeMillis()));
     }
 
+    private void cacheMainCardEventIfNeeded(Long paymentId, CoreSseEventResponse event) {
+        if (paymentId == null || event == null || event.getEventType() != CoreSseEventType.MAIN_CARD_READY) {
+            return;
+        }
+
+        mainCardEvents.put(paymentId, new CachedMainCardEvent(event, System.currentTimeMillis()));
+    }
+
+    private void replayCachedMainCardIfPresent(SseEmitter emitter, Long paymentId) {
+        CachedMainCardEvent cachedEvent = mainCardEvents.get(paymentId);
+        if (cachedEvent == null) {
+            return;
+        }
+
+        long ageMs = System.currentTimeMillis() - cachedEvent.createdAtMs();
+        if (ageMs > RECOMMENDATION_CACHE_TTL_MS) {
+            mainCardEvents.remove(paymentId, cachedEvent);
+            return;
+        }
+
+        try {
+            emitter.send(SseEmitter.event()
+                    .name(PAYMENT_UPDATED_EVENT_NAME)
+                    .id(String.valueOf(paymentId))
+                    .data(cachedEvent.event()));
+        } catch (IOException e) {
+            log.warn("SSE main card replay send failed. paymentId={}", paymentId, e);
+            emitter.completeWithError(e);
+            removeEmitter(paymentId, emitter);
+        }
+    }
+
     private void replayCachedRecommendationIfPresent(SseEmitter emitter, Long paymentId) {
         log.info("replayCachedRecommendationIfPresent called.");
         CachedRecommendationEvent cachedEvent = recommendationEvents.get(paymentId);
@@ -177,6 +212,8 @@ public class CoreSseService {
         long now = System.currentTimeMillis();
         recommendationEvents.entrySet().removeIf(
                 entry -> now - entry.getValue().createdAtMs() > RECOMMENDATION_CACHE_TTL_MS);
+        mainCardEvents.entrySet().removeIf(
+                entry -> now - entry.getValue().createdAtMs() > RECOMMENDATION_CACHE_TTL_MS);
     }
 
     private boolean isRecommendationEvent(CoreSseEventType eventType) {
@@ -202,6 +239,9 @@ public class CoreSseService {
     }
 
     private record CachedRecommendationEvent(CoreSseEventResponse event, long createdAtMs) {
+    }
+
+    private record CachedMainCardEvent(CoreSseEventResponse event, long createdAtMs) {
     }
 
 }

@@ -61,6 +61,7 @@ public class CorePgPaymentService {
     private static final String PG_STATUS_FAILED = "FAILED";
     private static final String PG_STATUS_VOIDED = "VOIDED";
     private static final String CARD_EVENT_APPROVED = "APPROVED";
+    private static final String AUTH_ONLY_STRATEGY_TYPE = CoreEntity.StrategyType.PERF_SINGLE.name();
     private static final String HOST_AUTH_STATUS_AUTHORIZED = "AUTHORIZED";
     private static final String HOST_AUTH_STATUS_FAILED = "FAILED";
     private static final String PARTICIPANT_PAYMENT_STATUS_PAID = "PAID";
@@ -90,8 +91,9 @@ public class CorePgPaymentService {
 
         boolean useAuthOnly = shouldUseAuthOnly(payment);
 
-        RecommendResponse.Result selectedRecommendation = validateRecommendationSelection(payment.getPaymentId(),
-                request);
+        RecommendResponse.Result selectedRecommendation = useAuthOnly
+                ? null
+                : validateRecommendationSelection(payment.getPaymentId(), request);
 
         Map<Long, CardBillingKeyResponse> billingKeys = fetchBillingKeysOrThrow(payment, request.getCards());
 
@@ -110,7 +112,7 @@ public class CorePgPaymentService {
             corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(
                     payment.getPaymentId(),
                     pgResponse,
-                    selectedRecommendation.getStrategyType());
+                    AUTH_ONLY_STRATEGY_TYPE);
             notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
             publishAuthorizedEvent(payment.getPaymentId());
             return;
