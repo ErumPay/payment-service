@@ -198,6 +198,15 @@ public class CoreEntity {
         this.updatedAt = failedAt;
     }
 
+    // [be] 다윤 260607 05:00 | 결제 취소 요청 status 업데이트 메서드
+    public void cancelRequestedStatusUpdatePayment(LocalDateTime requestedAt) {
+        if (requestedAt == null) {
+            throw new IllegalArgumentException("requestedAt must not be null");
+        }
+        this.payment_status = PaymentStatus.CANCEL_REQUESTED;
+        this.updatedAt = requestedAt;
+    }
+
     // [be] 다윤 260527 취소 성공 status 업데이트
     public void voidedStatusUpdatePayment(LocalDateTime canceledAt) {
         if (canceledAt == null) {

@@ -28,6 +28,7 @@ public class CancelEntity {
     private Long payment_id;
     private Long amount;
     private Long pg_txn_id;
+    private Long pg_group_id;
     private String pg_cancel_approval_num;
     private String fail_code;
 

@@ -2,6 +2,7 @@ package com.erumpay.payment.core.domain.entity;
 
 import java.time.LocalDateTime;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -27,7 +28,9 @@ public class EventEntity {
 
     private Long payment_id;
     private Long pg_txn_id;
+    private Long pg_group_id;
 
+    @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     private EventType event_type;
 
@@ -41,13 +44,13 @@ public class EventEntity {
         CREATED,
         PAY_PENDING,
         PG_PENDING,
-        AUTHORIZED,
         PAID,
         CANCEL_REQUESTED,
-        VOIDED,
         CANCELED,
         FAILED,
-        EXPIRED
+        EXPIRED,
+        AUTHORIZED,
+        VOIDED
     }
 
     public enum ActorType {
