@@ -15,9 +15,9 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.erumpay.payment.core.domain.dto.CoreSseEventResponse;
-import com.erumpay.payment.core.domain.dto.CoreSseEventType;
-import com.erumpay.payment.core.domain.dto.CoreSseRedisMessage;
+import com.erumpay.payment.core.domain.dto.response.CoreSseEventResponse;
+import com.erumpay.payment.core.domain.dto.sse.CoreSseEventType;
+import com.erumpay.payment.core.domain.dto.sse.CoreSseRedisMessage;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

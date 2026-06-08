@@ -9,8 +9,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import com.erumpay.payment.core.dao.CoreRepository;
-import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
-import com.erumpay.payment.core.domain.dto.PrepareResponse;
+import com.erumpay.payment.core.domain.dto.request.PinAndPayRequest;
+import com.erumpay.payment.core.domain.dto.response.PrepareResponse;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;

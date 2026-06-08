@@ -16,7 +16,7 @@ import com.erumpay.payment.core.dao.CardDetailRepository;
 import com.erumpay.payment.core.dao.CancelRepository;
 import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.dao.EventRepository;
-import com.erumpay.payment.core.domain.dto.PaidCardRequest;
+import com.erumpay.payment.core.domain.dto.request.PaidCardRequest;
 import com.erumpay.payment.core.domain.entity.CancelEntity;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity.CardStatus;
@@ -392,7 +392,7 @@ public class CorePgPaymentPersistenceService {
 
     // [be] 다윤 260601 20:00 | 가승인 성공 원장 기록
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void markAuthorizedAndSaveEvent(Long paymentId, PgAuthPayResponse pgResponse) {
+    public void markAuthorizedAndSaveEvent(Long paymentId, PgAuthPayResponse pgResponse, String strategyType) {
         if (hasStatusEvent(paymentId, EventEntity.EventType.AUTHORIZED)) {
             return;
         }
@@ -400,7 +400,12 @@ public class CorePgPaymentPersistenceService {
         CoreEntity payment = coreRepository.findById(paymentId)
                 .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
 
-        payment.authorizedStatusUpdatePayment(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        payment.updateStrategyType(strategyType, now);
+        if (pgResponse != null && pgResponse.getPgGroupId() != null) {
+            payment.updatePgGroupId(pgResponse.getPgGroupId(), now);
+        }
+        payment.authorizedStatusUpdatePayment(now);
 
         EventEntity savedEvent = EventEntity.builder()
                 .payment_id(payment.getPaymentId())
@@ -408,7 +413,7 @@ public class CorePgPaymentPersistenceService {
                 .pg_group_id(pgResponse == null ? null : pgResponse.getPgGroupId())
                 .event_type(EventEntity.EventType.AUTHORIZED)
                 .actor_type(EventEntity.ActorType.PG)
-                .created_at(LocalDateTime.now())
+                .created_at(now)
                 .build();
 
         saveEventOrThrow(savedEvent);

@@ -1,4 +1,4 @@
-package com.erumpay.payment.core.domain.dto;
+package com.erumpay.payment.core.domain.dto.sse;
 
 public enum CoreSseEventType {
     CONNECTED,
