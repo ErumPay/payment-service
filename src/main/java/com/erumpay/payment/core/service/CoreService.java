@@ -309,6 +309,18 @@ public class CoreService {
                 payment.getUserId(),
                 payment.getPaymentId(),
                 payment.getOrder_name());
+        publishPaymentSettlementCompletedIfEligible(payment);
+    }
+
+    private void publishPaymentSettlementCompletedIfEligible(CoreEntity payment) {
+        if (payment.getMerchant_id() == null || payment.getAmount() == null) {
+            return;
+        }
+
+        coreNotificationEventPublisher.publishPaymentSettlementCompleted(
+                payment.getMerchant_id(),
+                payment.getPaymentId(),
+                payment.getAmount());
     }
 
     // [be] 다윤 260526 auth-service pin 인증 요청
