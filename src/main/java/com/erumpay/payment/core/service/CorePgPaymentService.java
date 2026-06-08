@@ -28,9 +28,9 @@ import com.erumpay.payment.core.client.pg.dto.PgSplitPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgSplitPayResponse;
 import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
 import com.erumpay.payment.core.dao.EventRepository;
-import com.erumpay.payment.core.domain.dto.CoreSseEventType;
-import com.erumpay.payment.core.domain.dto.PaidCardRequest;
-import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
+import com.erumpay.payment.core.domain.dto.request.PaidCardRequest;
+import com.erumpay.payment.core.domain.dto.request.PinAndPayRequest;
+import com.erumpay.payment.core.domain.dto.sse.CoreSseEventType;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.domain.entity.EventEntity;
@@ -107,7 +107,10 @@ public class CorePgPaymentService {
 
         if (useAuthOnly) {
             PgAuthPayResponse pgResponse = approvedPayments.get(0).pgResponse();
-            corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
+            corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(
+                    payment.getPaymentId(),
+                    pgResponse,
+                    selectedRecommendation.getStrategyType());
             notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
             publishAuthorizedEvent(payment.getPaymentId());
             return;

@@ -1,4 +1,6 @@
-package com.erumpay.payment.core.domain.dto;
+package com.erumpay.payment.core.domain.dto.sse;
+
+import com.erumpay.payment.core.domain.dto.response.CoreSseEventResponse;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

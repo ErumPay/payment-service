@@ -42,31 +42,33 @@ import com.erumpay.payment.core.client.recommend.dto.RecommendRequest;
 import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
 import com.erumpay.payment.core.dao.CardDetailRepository;
 import com.erumpay.payment.core.dao.CoreRepository;
-import com.erumpay.payment.core.domain.dto.CanceledResponse;
-import com.erumpay.payment.core.domain.dto.CoreSseEventType;
-import com.erumpay.payment.core.domain.dto.DutchMemberPrepareRequest;
-import com.erumpay.payment.core.domain.dto.PaymentDetailResponse;
-import com.erumpay.payment.core.domain.dto.PaymentAllFetchRequest;
-import com.erumpay.payment.core.domain.dto.PaymentAllFetchResponse;
-import com.erumpay.payment.core.domain.dto.PaymentListResonse;
-import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
-import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
-import com.erumpay.payment.core.domain.dto.PrepareRequest;
-import com.erumpay.payment.core.domain.dto.PrepareResponse;
-import com.erumpay.payment.core.domain.dto.RemoteMemberPrepareRequest;
-import com.erumpay.payment.core.domain.dto.UserWithdrawalResponse;
+import com.erumpay.payment.core.domain.dto.request.DutchMemberPrepareRequest;
+import com.erumpay.payment.core.domain.dto.request.PaymentAllFetchRequest;
+import com.erumpay.payment.core.domain.dto.request.PinAndPayRequest;
+import com.erumpay.payment.core.domain.dto.request.PrepareRequest;
+import com.erumpay.payment.core.domain.dto.request.RemoteMemberPrepareRequest;
+import com.erumpay.payment.core.domain.dto.response.CanceledResponse;
+import com.erumpay.payment.core.domain.dto.response.PaymentAllFetchResponse;
+import com.erumpay.payment.core.domain.dto.response.PaymentDetailResponse;
+import com.erumpay.payment.core.domain.dto.response.PaymentListResonse;
+import com.erumpay.payment.core.domain.dto.response.PinAndPayResponse;
+import com.erumpay.payment.core.domain.dto.response.PrepareResponse;
+import com.erumpay.payment.core.domain.dto.response.UserWithdrawalResponse;
+import com.erumpay.payment.core.domain.dto.sse.CoreSseEventType;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity.CardStatus;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.domain.entity.EventEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
+import com.erumpay.payment.dutch.dao.DutchPaySessionRepository;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRequest;
 import com.erumpay.payment.dutch.service.DutchPayService;
 import com.erumpay.payment.notification.service.CoreNotificationEventPublisher;
 import com.erumpay.payment.qr.service.QrService;
+import com.erumpay.payment.remote.dao.RemotePayRequestRepository;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateResponse;
 import com.erumpay.payment.remote.domain.dto.RemotePayDraftCreateRequest;
 import com.erumpay.payment.remote.service.RemotePayService;
@@ -93,6 +95,7 @@ public class CoreService {
     private static final String PG_ERROR_ALREADY_CANCELLED = "PAYMENT_ALREADY_CANCELLED";
     private static final String SPLIT_CANCEL_REASON = "사용자 요청으로 분할결제 전체 취소";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
+    private static final String RECOMMENDATION_STATUS_NOT_APPLICABLE = "NOT_APPLICABLE";
     private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
     private static final Duration RECOMMENDATION_CACHE_TTL = Duration.ofMinutes(30);
     private static final ZoneId PAYMENT_HISTORY_BUSINESS_ZONE = ZoneId.of("Asia/Seoul");
@@ -117,8 +120,10 @@ public class CoreService {
     private final AuthClient authClient;
     private final AuthFeignErrorMapper authFeignErrorMapper;
     private final DutchPayService dutchPayService;
+    private final DutchPaySessionRepository dutchPaySessionRepository;
     private final QrService qrService;
     private final RemotePayService remotePayService;
+    private final RemotePayRequestRepository remotePayRequestRepository;
     private final EntityManager entityManager;
     private final RecommendClient recommendClient;
     private final RecommendFeignErrorMapper recommendFeignErrorMapper;
@@ -164,6 +169,9 @@ public class CoreService {
         createDutchHostSessionIfNeeded(request.getPaymentId(), userId, payment, paymentType);
         createRemoteDraftIfNeeded(userId, payment, paymentType, now);
 
+        if (paymentType == CoreEntity.PaymentType.REMOTE) {
+            return ResponseEntity.ok(toPrepareResponse(payment, RECOMMENDATION_STATUS_NOT_APPLICABLE));
+        }
         return finalizePrepare(payment, userId);
     }
 
@@ -1169,10 +1177,14 @@ public class CoreService {
     }
 
     private PrepareResponse toPrepareResponse(CoreEntity payment) {
+        return toPrepareResponse(payment, RECOMMENDATION_STATUS_PENDING);
+    }
+
+    private PrepareResponse toPrepareResponse(CoreEntity payment, String recommendationStatus) {
         return PrepareResponse.builder()
                 .paymentId(payment.getPaymentId())
                 .paymentStatus(payment.getPayment_status() == null ? null : payment.getPayment_status().name())
-                .recommendationStatus(RECOMMENDATION_STATUS_PENDING)
+                .recommendationStatus(recommendationStatus)
                 .paymentType(payment.getPayment_type() == null ? null : payment.getPayment_type().name())
                 .paymentIntent(payment.getPayment_intent() == null ? null : payment.getPayment_intent().name())
                 .dutchRole(payment.getDutch_role() == null ? null : payment.getDutch_role().name())
@@ -1212,12 +1224,13 @@ public class CoreService {
             LocalDateTime now,
             CoreEntity.DutchRole dutchRole,
             CoreEntity.PaymentIntent paymentIntent) {
-        return CoreEntity.builder()
+        CoreEntity sourcePayment = findDutchSourcePayment(request.getSessionId());
+        CoreEntity payment = CoreEntity.builder()
                 .userId(userId)
-                .merchant_id(request.getMerchantId())
+                .merchant_id(sourcePayment.getMerchant_id())
                 .idempotencyKey(normalizedIdempotencyKey)
                 .order_no(qrService.generateUniqueOrderNo(now))
-                .order_name(request.getOrderName())
+                .order_name(sourcePayment.getOrder_name())
                 .amount(request.getAmount())
                 .payment_status(CoreEntity.PaymentStatus.CREATED)
                 .payment_type(CoreEntity.PaymentType.DUTCH)
@@ -1228,6 +1241,8 @@ public class CoreService {
                 .updatedAt(now)
                 .created_at(now)
                 .build();
+        copyMerchantInfo(payment, sourcePayment, now);
+        return payment;
     }
 
     private DutchPaymentSaveOutcome saveRemoteDeputyPaymentWithIdempotencyGuard(
@@ -1282,12 +1297,13 @@ public class CoreService {
             String normalizedIdempotencyKey,
             RemoteMemberPrepareRequest request,
             LocalDateTime now) {
-        return CoreEntity.builder()
+        CoreEntity sourcePayment = findRemoteSourcePayment(request.getRemoteRequestId());
+        CoreEntity payment = CoreEntity.builder()
                 .userId(userId)
-                .merchant_id(request.getMerchantId())
+                .merchant_id(sourcePayment.getMerchant_id())
                 .idempotencyKey(normalizedIdempotencyKey)
                 .order_no(qrService.generateUniqueOrderNo(now))
-                .order_name(request.getOrderName())
+                .order_name(sourcePayment.getOrder_name())
                 .amount(request.getAmount())
                 .payment_status(CoreEntity.PaymentStatus.CREATED)
                 .payment_type(CoreEntity.PaymentType.REMOTE)
@@ -1296,6 +1312,41 @@ public class CoreService {
                 .updatedAt(now)
                 .created_at(now)
                 .build();
+        copyMerchantInfo(payment, sourcePayment, now);
+        return payment;
+    }
+
+    private CoreEntity findDutchSourcePayment(Long sessionId) {
+        Long hostAuthPaymentId = dutchPaySessionRepository.findById(sessionId)
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND))
+                .getHost_auth_payment_id();
+        if (hostAuthPaymentId == null) {
+            throw new CustomException(ErrorCode.DUTCH_HOST_AUTH_NOT_CREATED);
+        }
+        return coreRepository.findById(hostAuthPaymentId)
+                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+    }
+
+    private CoreEntity findRemoteSourcePayment(Long remoteRequestId) {
+        Long sourcePaymentId = remotePayRequestRepository.findById(remoteRequestId)
+                .orElseThrow(() -> new CustomException(ErrorCode.RMT_REQUEST_NOT_FOUND))
+                .getSource_payment_id();
+        if (sourcePaymentId == null) {
+            throw new CustomException(ErrorCode.RMT_SOURCE_PAYMENT_NOT_FOUND);
+        }
+        return coreRepository.findById(sourcePaymentId)
+                .orElseThrow(() -> new CustomException(ErrorCode.RMT_SOURCE_PAYMENT_NOT_FOUND));
+    }
+
+    private void copyMerchantInfo(CoreEntity targetPayment, CoreEntity sourcePayment, LocalDateTime now) {
+        targetPayment.updateMerchantInfo(
+                sourcePayment.getMerchant_name(),
+                sourcePayment.getBusiness_number(),
+                sourcePayment.getOwner_name(),
+                sourcePayment.getContact_phone(),
+                sourcePayment.getBusiness_address(),
+                sourcePayment.getMcc(),
+                now);
     }
 
     // [be] 다윤 260529 13:00 | 결제 카드추천 조합 요청
@@ -1305,9 +1356,9 @@ public class CoreService {
                     RecommendRequest.builder()
                             .paymentId(payment.getPaymentId())
                             .userId(userId)
-                            // .merchantName(payment.getMerchant_name())
-                            .merchantName("스타벅스 강남점")
-                            .mccCode("5814")
+                            .merchantName(payment.getMerchant_name())
+                            // .merchantName("스타벅스 강남점")
+                            .mccCode(payment.getMcc())
                             .amount(payment.getAmount())
                             .build());
 

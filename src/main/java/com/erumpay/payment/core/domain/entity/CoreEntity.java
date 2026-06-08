@@ -19,11 +19,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(
-        name = "payment_orders",
-        indexes = @Index(
-                name = "idx_payment_orders_user_payment_status",
-                columnList = "user_id, payment_status"))
+@Table(name = "payment_orders", indexes = @Index(name = "idx_payment_orders_user_payment_status", columnList = "user_id, payment_status"))
 @Builder
 @Getter
 @AllArgsConstructor
@@ -65,6 +61,7 @@ public class CoreEntity {
     private String owner_name;
     private String contact_phone;
     private String business_address;
+    private String mcc;
 
     // 더치
     private Long dutch_session_id;
@@ -153,6 +150,26 @@ public class CoreEntity {
             throw new IllegalArgumentException("pgGroupId and updatedAt must not be null");
         }
         this.pgGroupId = pgGroupId;
+        this.updatedAt = updatedAt;
+    }
+
+    public void updateMerchantInfo(
+            String merchantName,
+            String businessNumber,
+            String ownerName,
+            String contactPhone,
+            String businessAddress,
+            String mcc,
+            LocalDateTime updatedAt) {
+        if (updatedAt == null) {
+            throw new IllegalArgumentException("updatedAt must not be null");
+        }
+        this.merchant_name = merchantName;
+        this.business_number = businessNumber;
+        this.owner_name = ownerName;
+        this.contact_phone = contactPhone;
+        this.business_address = businessAddress;
+        this.mcc = mcc;
         this.updatedAt = updatedAt;
     }
 

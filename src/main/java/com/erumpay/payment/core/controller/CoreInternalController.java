@@ -8,9 +8,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.erumpay.payment.core.domain.dto.PaymentAllFetchRequest;
-import com.erumpay.payment.core.domain.dto.PaymentAllFetchResponse;
-import com.erumpay.payment.core.domain.dto.UserWithdrawalResponse;
+import com.erumpay.payment.core.domain.dto.request.PaymentAllFetchRequest;
+import com.erumpay.payment.core.domain.dto.response.PaymentAllFetchResponse;
+import com.erumpay.payment.core.domain.dto.response.UserWithdrawalResponse;
 import com.erumpay.payment.core.service.CoreService;
 
 import io.swagger.v3.oas.annotations.Operation;

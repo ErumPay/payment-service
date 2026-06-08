@@ -1,6 +1,8 @@
-package com.erumpay.payment.core.domain.dto;
+package com.erumpay.payment.core.domain.dto.response;
 
 import java.time.Instant;
+
+import com.erumpay.payment.core.domain.dto.sse.CoreSseEventType;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

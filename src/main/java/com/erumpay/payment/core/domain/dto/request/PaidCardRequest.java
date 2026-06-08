@@ -1,4 +1,4 @@
-package com.erumpay.payment.core.domain.dto;
+package com.erumpay.payment.core.domain.dto.request;
 
 import java.time.LocalDateTime;
 

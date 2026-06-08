@@ -1,4 +1,4 @@
-package com.erumpay.payment.core.domain.dto;
+package com.erumpay.payment.core.domain.dto.response;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
