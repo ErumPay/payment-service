@@ -1,0 +1,56 @@
+package com.erumpay.payment.core.client.pg;
+
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+
+import com.erumpay.payment.core.client.pg.dto.PgAuthPayRequest;
+import com.erumpay.payment.core.client.pg.dto.PgAuthPayResponse;
+import com.erumpay.payment.core.client.pg.dto.PgPayCancelRequest;
+import com.erumpay.payment.core.client.pg.dto.PgSplitPayRequest;
+import com.erumpay.payment.core.client.pg.dto.PgSplitPayResponse;
+
+@FeignClient(name = "pgClient", url = "${pg.base-url}")
+public interface PgClient {
+
+        @PostMapping(value = "/internal/v1/pg/payments", consumes = "application/json")
+        PgAuthPayResponse pgPaymentRequest(
+                        @RequestHeader("Authorization") String authorization,
+                        @RequestHeader("Idempotency-Key") String idempotencyKey,
+                        @RequestBody PgAuthPayRequest request);
+
+        @PostMapping(value = "/internal/v1/pg/payments/split", consumes = "application/json")
+        PgSplitPayResponse pgSplitPaymentRequest(
+                        @RequestHeader("Authorization") String authorization,
+                        @RequestHeader("Idempotency-Key") String idempotencyKey,
+                        @RequestBody PgSplitPayRequest request);
+
+        @PostMapping(value = "/internal/v1/pg/payments/split/{pgGroupId}/cancel", consumes = "application/json")
+        PgSplitPayResponse pgSplitPaymentCancelRequest(
+                        @RequestHeader("Authorization") String authorization,
+                        @RequestHeader("Idempotency-Key") String idempotencyKey,
+                        @PathVariable("pgGroupId") Long pgGroupId,
+                        @RequestBody PgPayCancelRequest request);
+
+        @PostMapping(value = "/internal/v1/pg/payments/auth-only", consumes = "application/json")
+        PgAuthPayResponse pgPaymentAuthOnlyRequest(
+                        @RequestHeader("Authorization") String authorization,
+                        @RequestHeader("Idempotency-Key") String idempotencyKey,
+                        @RequestBody PgAuthPayRequest request);
+
+        @PostMapping(value = "/internal/v1/pg/payments/{pgTxnId}/cancel", consumes = "application/json")
+        PgAuthPayResponse pgPaymentCancelRequest(
+                        @RequestHeader("Authorization") String authorization,
+                        @RequestHeader("Idempotency-Key") String idempotencyKey,
+                        @PathVariable("pgTxnId") Long pgTxnId,
+                        @RequestBody PgPayCancelRequest request);
+
+        @PostMapping(value = "/internal/v1/pg/payments/{pgTxnId}/void", consumes = "application/json")
+        PgAuthPayResponse pgPaymentAuthCancelRequest(
+                        @RequestHeader("Authorization") String authorization,
+                        @RequestHeader("Idempotency-Key") String idempotencyKey,
+                        @PathVariable("pgTxnId") Long pgTxnId,
+                        @RequestBody PgPayCancelRequest request);
+}

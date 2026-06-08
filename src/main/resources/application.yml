@@ -1,0 +1,100 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: payment
+
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+  qr:
+    baseUrl: ${QR_BASEURL}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP_ID:payment-core}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: '*'
+        spring.json.value.default.type: com.erumpay.payment.core.kafka.recommend.consumer.RecommendEventMessage
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://erumpay-zipkin.platform-operations.svc.cluster.local:9411/api/v2/spans}
+
+app:
+  cors:
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:19000,http://localhost:5173,http://localhost:8080}
+    allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,PATCH,DELETE,OPTIONS}
+    allowed-headers: ${CORS_ALLOWED_HEADERS:*}
+    exposed-headers: ${CORS_EXPOSED_HEADERS:}
+    allow-credentials: ${CORS_ALLOW_CREDENTIALS:true}
+    max-age: ${CORS_MAX_AGE:3600}
+  kafka:
+    topics:
+      recommend-command: ${RECOMMEND_COMMAND_TOPIC:recommend.command}
+      recommend-event: ${RECOMMEND_EVENT_TOPIC:recommend.event}
+      payment-event: ${PAYMENT_EVENT_TOPIC:payment.event}
+      dutch-event: ${DUTCH_EVENT_TOPIC:dutch.event}
+      remote-command: ${REMOTE_COMMAND_TOPIC:remote.command}
+      remote-event: ${REMOTE_EVENT_TOPIC:remote.event}
+  redis:
+    channels:
+      core-pay-events: ${CORE_PAY_EVENT_CHANNEL:core-pay:events}
+      dutch-pay-session-events: ${DUTCH_PAY_SESSION_EVENT_CHANNEL:dutch-pay:session-events}
+      remote-pay-request-events: ${REMOTE_PAY_REQUEST_EVENT_CHANNEL:remote-pay:request-events}
+  remote-pay:
+    expires-after-minutes: ${REMOTE_PAY_EXPIRES_AFTER_MINUTES:30}
+    friend-validation-enabled: ${REMOTE_PAY_FRIEND_VALIDATION_ENABLED:true}
+
+auth:
+  base-url: ${AUTH_BASE_URL}
+
+pg:
+  base-url: ${PG_BASE_URL}
+  authorization: ${PG_AUTHORIZATION:Bearer server-test-token}
+
+checkout:
+  redirect-base-url: ${CHECKOUT_REDIRECT_BASE_URL:http://localhost:5173/checkout?token=}
+
+recommend:
+  base-url: ${RECOMMEND_BASE_URL}
+
+card:
+  base-url: ${CARD_BASE_URL}
+
+merchant:
+  base-url: ${MERCHANT_BASE_URL:http://localhost:8094}
+  api-key-dev-fallback-enabled: ${MERCHANT_API_KEY_DEV_FALLBACK_ENABLED:false}
