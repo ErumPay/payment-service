@@ -232,7 +232,7 @@ public class CoreNotificationEventPublisher {
         String action = switch (eventType) {
             case PAYMENT_COMPLETED -> "completed";
             case PAYMENT_CANCELED -> "canceled";
-            case PAYMENT_SETTLEMENT_COMPLETED -> throw new IllegalArgumentException(
+            case PAYMENT_SETTLEMENT_COMPLETED, PAYMENT_SETTLEMENT_CANCELED -> throw new IllegalArgumentException(
                     "Settlement event type is not supported for user notification eventId: " + eventType);
         };
 
@@ -250,6 +250,18 @@ public class CoreNotificationEventPublisher {
             Long amount) {
         publishSettlementEvent(
                 PaymentEventType.PAYMENT_SETTLEMENT_COMPLETED,
+                merchantId,
+                paymentId,
+                amount);
+    }
+
+    // [be] 다윤 260609 | 결제 취소 정산 이벤트 발행
+    public void publishPaymentSettlementCanceled(
+            Long merchantId,
+            Long paymentId,
+            Long amount) {
+        publishSettlementEvent(
+                PaymentEventType.PAYMENT_SETTLEMENT_CANCELED,
                 merchantId,
                 paymentId,
                 amount);
@@ -291,13 +303,15 @@ public class CoreNotificationEventPublisher {
             PaymentEventType eventType,
             Long paymentId,
             Long merchantId) {
-        if (eventType != PaymentEventType.PAYMENT_SETTLEMENT_COMPLETED) {
-            throw new IllegalArgumentException("Unsupported settlement event type: " + eventType);
-        }
+        String action = switch (eventType) {
+            case PAYMENT_SETTLEMENT_COMPLETED -> "completed";
+            case PAYMENT_SETTLEMENT_CANCELED -> "canceled";
+            default -> throw new IllegalArgumentException("Unsupported settlement event type: " + eventType);
+        };
 
         return String.format(
                 "payment:settlement:%s:%d:%d",
-                "completed",
+                action,
                 paymentId,
                 merchantId);
     }
