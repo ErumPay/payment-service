@@ -50,7 +50,7 @@ public class RemotePayService {
         log.info("/api/v1/remote-pay/requests Service");
 
         if (requesterUserId == null || request == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
         }
 
         remotePayFriendValidator.validate(requesterUserId, request.getTarget_user_id());
@@ -67,11 +67,11 @@ public class RemotePayService {
         log.info("/internal/v1/remote-pay/requests Service");
 
         if (requesterUserId == null || request == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
         }
 
         CoreEntity payment = coreRepository.findById(request.getPayment_id())
-                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+                .orElseThrow(() -> new CustomException(ErrorCode.RMT_SOURCE_PAYMENT_NOT_FOUND));
 
         remotePayFriendValidator.validate(requesterUserId, request.getTarget_user_id());
 
@@ -89,11 +89,11 @@ public class RemotePayService {
         log.info("/internal/v1/remote-pay/requests/draft Service");
 
         if (requesterUserId == null || request == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
         }
 
         CoreEntity sourcePayment = coreRepository.findById(request.getSource_payment_id())
-                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+                .orElseThrow(() -> new CustomException(ErrorCode.RMT_SOURCE_PAYMENT_NOT_FOUND));
 
         RemotePayCreateResponse response = transactionTemplate.execute(
                 status -> saveDraftRequestFromCore(requesterUserId, sourcePayment, request.getDescription()));
@@ -109,7 +109,7 @@ public class RemotePayService {
             CoreEntity payment,
             String description) {
         if (requesterUserId == null || targetUserId == null || payment == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
         }
 
         remotePayFriendValidator.validate(requesterUserId, targetUserId);
@@ -126,11 +126,14 @@ public class RemotePayService {
         log.info("/api/v1/remote-pay/requests/{} Service", requestId);
 
         if (userId == null || requestId == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
         }
 
-        RemotePayRequestEntity request = remotePayRequestRepository.findDetailByIdAndUserId(requestId, userId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+        RemotePayRequestEntity request = remotePayRequestRepository.findDetailById(requestId)
+                .orElseThrow(() -> new CustomException(ErrorCode.RMT_REQUEST_NOT_FOUND));
+        if (!userId.equals(request.getRequester_user_id()) && !userId.equals(request.getTarget_user_id())) {
+            throw new CustomException(ErrorCode.RMT_ACCESS_DENIED);
+        }
         return RemotePayCreateResponse.fromEntity(request);
     }
 
@@ -138,7 +141,10 @@ public class RemotePayService {
         log.info("/api/v1/remote-pay/requests/{}/target Service", requestId);
 
         if (requesterUserId == null || targetRequest == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
+        }
+        if (targetRequest.getTarget_user_id() == null) {
+            throw new CustomException(ErrorCode.RMT_TARGET_REQUIRED);
         }
 
         remotePayFriendValidator.validate(requesterUserId, targetRequest.getTarget_user_id());
@@ -154,7 +160,7 @@ public class RemotePayService {
         try {
             request.assignTarget(requesterUserId, targetRequest.getTarget_user_id(), LocalDateTime.now());
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+            throw toRemotePayException(e);
         }
 
         RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
@@ -169,7 +175,7 @@ public class RemotePayService {
         log.info("/api/v1/remote-pay/requests/active Service");
 
         if (userId == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
         }
 
         return remotePayRequestRepository.findRequestsByUserIdAndStatuses(
@@ -190,7 +196,7 @@ public class RemotePayService {
         try {
             request.assignPayment(targetUserId, payment, LocalDateTime.now());
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+            throw toRemotePayException(e);
         }
 
         RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
@@ -204,11 +210,11 @@ public class RemotePayService {
     @Transactional
     public RemotePayCreateResponse connectPaymentForPrepare(Long targetUserId, Long requestId, Long payerPaymentId) {
         if (targetUserId == null || requestId == null || payerPaymentId == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
         }
 
         CoreEntity payment = coreRepository.findById(payerPaymentId)
-                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+                .orElseThrow(() -> new CustomException(ErrorCode.RMT_PAYMENT_INVALID));
         return connectPaymentForPrepare(targetUserId, requestId, payment);
     }
 
@@ -222,7 +228,7 @@ public class RemotePayService {
         try {
             request.reject(targetUserId, normalizeDescription(rejectReason), LocalDateTime.now());
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+            throw toRemotePayException(e);
         }
 
         RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
@@ -241,7 +247,7 @@ public class RemotePayService {
         try {
             request.cancel(requesterUserId, LocalDateTime.now());
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+            throw toRemotePayException(e);
         }
 
         RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
@@ -262,7 +268,7 @@ public class RemotePayService {
         try {
             request.complete(payment, now);
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+            throw toRemotePayException(e);
         }
         completeSourcePaymentIfNeeded(request, payment, now);
         RemotePayCreateResponse response = RemotePayCreateResponse.fromEntity(request);
@@ -314,7 +320,7 @@ public class RemotePayService {
         try {
             request.requirePayable(payment, LocalDateTime.now());
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+            throw toRemotePayException(e);
         }
     }
 
@@ -364,7 +370,7 @@ public class RemotePayService {
                     now.plusMinutes(expiresAfterMinutes),
                     now);
         } catch (IllegalArgumentException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+            throw toRemotePayException(e);
         }
 
         return RemotePayCreateResponse.fromEntity(remotePayRequestRepository.save(remoteRequest));
@@ -379,7 +385,7 @@ public class RemotePayService {
                 .orElse(null);
         if (existing != null) {
             if (!requesterUserId.equals(existing.getRequester_user_id())) {
-                throw new CustomException(ErrorCode.BAD_REQUEST);
+                throw new CustomException(ErrorCode.RMT_REQUESTER_ONLY_ACTION);
             }
             return RemotePayCreateResponse.fromEntity(existing);
         }
@@ -388,7 +394,7 @@ public class RemotePayService {
                 || sourcePayment.getAmount() == null
                 || sourcePayment.getAmount() <= 0
                 || sourcePayment.getChannel_type() != CoreEntity.ChannelType.ONLINE) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.RMT_SOURCE_PAYMENT_NOT_PAYABLE);
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -402,7 +408,7 @@ public class RemotePayService {
                     now.plusMinutes(expiresAfterMinutes),
                     now);
         } catch (IllegalArgumentException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+            throw toRemotePayException(e);
         }
 
         return RemotePayCreateResponse.fromEntity(remotePayRequestRepository.save(remoteRequest));
@@ -420,7 +426,7 @@ public class RemotePayService {
         if (existing != null) {
             if (!requesterUserId.equals(existing.getRequester_user_id())
                     || !targetUserId.equals(existing.getTarget_user_id())) {
-                throw new CustomException(ErrorCode.BAD_REQUEST);
+                throw new CustomException(ErrorCode.RMT_ACCESS_DENIED);
             }
             return RemotePayCreateResponse.fromEntity(existing);
         }
@@ -436,7 +442,7 @@ public class RemotePayService {
                     now.plusMinutes(expiresAfterMinutes),
                     now);
         } catch (IllegalArgumentException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+            throw toRemotePayException(e);
         }
 
         return RemotePayCreateResponse.fromEntity(remotePayRequestRepository.save(remoteRequest));
@@ -447,7 +453,7 @@ public class RemotePayService {
         try {
             request.expire(now);
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new CustomException(ErrorCode.BAD_REQUEST, e);
+            throw toRemotePayException(e);
         }
         return RemotePayCreateResponse.fromEntity(request);
     }
@@ -491,16 +497,16 @@ public class RemotePayService {
     // [be] 영은 260527 1030 | 요청 상태 변경 시 같은 request_id를 비관적 락으로 잡아 중복 취소/거절/완료 전이를 막는다.
     private RemotePayRequestEntity getRequestForUpdate(Long requestId) {
         if (requestId == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
         }
 
         return remotePayRequestRepository.findByIdForUpdate(requestId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.RMT_REQUEST_NOT_FOUND));
     }
 
     private RemotePayRequestEntity getRequestForPayment(CoreEntity payment) {
         if (payment == null || payment.getPaymentId() == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.RMT_PAYMENT_INVALID);
         }
 
         if (payment.getRemote_request_id() != null) {
@@ -508,7 +514,68 @@ public class RemotePayService {
         }
 
         return remotePayRequestRepository.findByPaymentIdForUpdate(payment.getPaymentId())
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.RMT_PAYMENT_NOT_CONNECTED));
+    }
+
+    private CustomException toRemotePayException(RuntimeException e) {
+        String message = e.getMessage();
+        if (message == null) {
+            return new CustomException(ErrorCode.RMT_INVALID_REQUEST, e);
+        }
+        if (message.contains("requester and target must be different")) {
+            return new CustomException(ErrorCode.RMT_REQUESTER_TARGET_SAME, e);
+        }
+        if (message.contains("targetUserId")
+                || message.contains("required remote payment fields")
+                || message.contains("required remote payment draft fields")) {
+            return new CustomException(ErrorCode.RMT_TARGET_REQUIRED, e);
+        }
+        if (message.contains("amount must be positive")) {
+            return new CustomException(ErrorCode.RMT_INVALID_AMOUNT, e);
+        }
+        if (message.contains("expiresAt must be after now")) {
+            return new CustomException(ErrorCode.RMT_EXPIRES_AT_INVALID, e);
+        }
+        if (message.contains("only requester")) {
+            return new CustomException(ErrorCode.RMT_REQUESTER_ONLY_ACTION, e);
+        }
+        if (message.contains("only target")) {
+            return new CustomException(ErrorCode.RMT_TARGET_ONLY_ACTION, e);
+        }
+        if (message.contains("only in draft status")) {
+            return new CustomException(ErrorCode.RMT_REQUEST_NOT_DRAFT, e);
+        }
+        if (message.contains("is not pending")) {
+            return new CustomException(ErrorCode.RMT_REQUEST_NOT_PENDING, e);
+        }
+        if (message.contains("is expired")) {
+            return new CustomException(ErrorCode.RMT_REQUEST_EXPIRED, e);
+        }
+        if (message.contains("already has another target")) {
+            return new CustomException(ErrorCode.RMT_REQUEST_NOT_DRAFT, e);
+        }
+        if (message.contains("already has another payment")) {
+            return new CustomException(ErrorCode.RMT_PAYMENT_ALREADY_CONNECTED, e);
+        }
+        if (message.contains("not connected to payment")) {
+            return new CustomException(ErrorCode.RMT_PAYMENT_NOT_CONNECTED, e);
+        }
+        if (message.contains("payment amount does not match")) {
+            return new CustomException(ErrorCode.RMT_PAYMENT_AMOUNT_MISMATCH, e);
+        }
+        if (message.contains("payment user is not remote payment target")
+                || message.contains("payment user must match remote payment target")) {
+            return new CustomException(ErrorCode.RMT_PAYMENT_TARGET_MISMATCH, e);
+        }
+        if (message.contains("requires online payment")
+                || message.contains("payment must be persisted")) {
+            return new CustomException(ErrorCode.RMT_SOURCE_PAYMENT_NOT_PAYABLE, e);
+        }
+        if (message.contains("not expirable")
+                || message.contains("not expired yet")) {
+            return new CustomException(ErrorCode.RMT_REQUEST_STATUS_INVALID, e);
+        }
+        return new CustomException(ErrorCode.RMT_INVALID_REQUEST, e);
     }
 
 }

@@ -84,6 +84,7 @@ app:
       recommend-command: ${RECOMMEND_COMMAND_TOPIC:recommend.command}
       recommend-event: ${RECOMMEND_EVENT_TOPIC:recommend.event}
       payment-event: ${PAYMENT_EVENT_TOPIC:payment.event}
+      payment-settlement-event: ${PAYMENT_SETTLEMENT_EVENT_TOPIC:payment.settlement.event}
       dutch-event: ${DUTCH_EVENT_TOPIC:dutch.event}
       remote-command: ${REMOTE_COMMAND_TOPIC:remote.command}
       remote-event: ${REMOTE_EVENT_TOPIC:remote.event}
