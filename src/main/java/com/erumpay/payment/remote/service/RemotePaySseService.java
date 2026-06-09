@@ -79,11 +79,14 @@ public class RemotePaySseService {
 
     private RemotePayCreateResponse getRequestForSse(Long requestId, Long userId) {
         if (requestId == null || userId == null) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+            throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
         }
 
-        RemotePayRequestEntity request = remotePayRequestRepository.findDetailByIdAndUserId(requestId, userId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+        RemotePayRequestEntity request = remotePayRequestRepository.findDetailById(requestId)
+                .orElseThrow(() -> new CustomException(ErrorCode.RMT_REQUEST_NOT_FOUND));
+        if (!userId.equals(request.getRequester_user_id()) && !userId.equals(request.getTarget_user_id())) {
+            throw new CustomException(ErrorCode.RMT_ACCESS_DENIED);
+        }
 
         return RemotePayCreateResponse.fromEntity(request);
     }
@@ -91,7 +94,7 @@ public class RemotePaySseService {
     // [be] 영은 260528 1110 | SSE 발행 시점마다 DB 최신 상태를 다시 읽어 화면 payload와 저장 상태를 맞춘다.
     private RemotePayCreateResponse getRequestForBroadcast(Long requestId) {
         RemotePayRequestEntity request = remotePayRequestRepository.findDetailById(requestId)
-                .orElseThrow(() -> new CustomException(ErrorCode.BAD_REQUEST));
+                .orElseThrow(() -> new CustomException(ErrorCode.RMT_REQUEST_NOT_FOUND));
         return RemotePayCreateResponse.fromEntity(request);
     }
 

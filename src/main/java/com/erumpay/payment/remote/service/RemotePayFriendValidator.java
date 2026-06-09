@@ -23,8 +23,14 @@ public class RemotePayFriendValidator {
     private boolean friendValidationEnabled;
 
     public void validate(Long requesterUserId, Long targetUserId) {
-        if (requesterUserId == null || targetUserId == null || requesterUserId.equals(targetUserId)) {
-            throw new CustomException(ErrorCode.BAD_REQUEST);
+        if (requesterUserId == null) {
+            throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
+        }
+        if (targetUserId == null) {
+            throw new CustomException(ErrorCode.RMT_TARGET_REQUIRED);
+        }
+        if (requesterUserId.equals(targetUserId)) {
+            throw new CustomException(ErrorCode.RMT_REQUESTER_TARGET_SAME);
         }
 
         if (!friendValidationEnabled) {
@@ -39,10 +45,10 @@ public class RemotePayFriendValidator {
                     e.status(),
                     requesterUserId,
                     targetUserId);
-            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e);
+            throw new CustomException(ErrorCode.AUTH_FRIEND_VALIDATE_FAILED, e);
         }
         if (response == null || !response.isFriend()) {
-            throw new CustomException(ErrorCode.FORBIDDEN);
+            throw new CustomException(ErrorCode.RMT_FRIEND_NOT_ALLOWED);
         }
     }
 }

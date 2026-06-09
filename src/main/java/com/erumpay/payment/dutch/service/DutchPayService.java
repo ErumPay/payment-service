@@ -268,7 +268,7 @@ public class DutchPayService {
         }
 
         CoreEntity payment = coreRepository.findById(request.getPayment_id())
-                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_HOST_FINAL_PAYMENT_NOT_FOUND));
         if (!request.getUser_id().equals(payment.getUserId())) {
             throw new CustomException(ErrorCode.DUTCH_ACCESS_DENIED);
         }
@@ -974,7 +974,7 @@ public class DutchPayService {
                     .withoutPadding()
                     .encodeToString(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
-            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e);
+            throw new CustomException(ErrorCode.DUTCH_INTERNAL_ERROR, e);
         }
     }
 
