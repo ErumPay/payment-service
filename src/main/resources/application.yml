@@ -5,18 +5,6 @@ spring:
   application:
     name: payment
 
-  cloud:
-    openfeign:
-      circuitbreaker:
-        enabled: true
-      client:
-        config:
-          merchantClient:
-            retry:
-              period: ${MERCHANT_CLIENT_RETRY_PERIOD:200}
-              maxPeriod: ${MERCHANT_CLIENT_RETRY_MAX_PERIOD:1000}
-              maxAttempts: ${MERCHANT_CLIENT_RETRY_MAX_ATTEMPTS:3}
-
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -59,12 +47,12 @@ management:
     web:
       exposure:
         include: health
-  tracing:
-    sampling:
-      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
-  zipkin:
-    tracing:
-      endpoint: ${ZIPKIN_ENDPOINT:http://erumpay-zipkin.platform-operations.svc.cluster.local:9411/api/v2/spans}
+  # tracing:
+  #   sampling:
+  #     probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  # zipkin:
+  #   tracing:
+  #     endpoint: ${ZIPKIN_ENDPOINT:http://erumpay-zipkin.platform-operations.svc.cluster.local:9411/api/v2/spans}
 
 app:
   cors:
@@ -111,13 +99,3 @@ card:
 merchant:
   base-url: ${MERCHANT_BASE_URL:http://localhost:8094}
   api-key-dev-fallback-enabled: ${MERCHANT_API_KEY_DEV_FALLBACK_ENABLED:false}
-
-resilience4j:
-  circuitbreaker:
-    instances:
-      merchantClient:
-        slidingWindowType: COUNT_BASED
-        slidingWindowSize: 10
-        minimumNumberOfCalls: 5
-        failureRateThreshold: 50
-        waitDurationInOpenState: 10s

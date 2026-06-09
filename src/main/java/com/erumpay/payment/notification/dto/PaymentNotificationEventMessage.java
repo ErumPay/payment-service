@@ -21,6 +21,7 @@ public class PaymentNotificationEventMessage {
     public enum PaymentEventType {
         PAYMENT_COMPLETED,
         PAYMENT_CANCELED,
-        PAYMENT_SETTLEMENT_COMPLETED
+        PAYMENT_SETTLEMENT_COMPLETED,
+        PAYMENT_SETTLEMENT_CANCELED
     }
 }
