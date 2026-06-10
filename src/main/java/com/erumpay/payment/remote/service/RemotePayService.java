@@ -137,6 +137,17 @@ public class RemotePayService {
         return RemotePayCreateResponse.fromEntity(request);
     }
 
+    @Transactional(readOnly = true)
+    public RemotePayCreateResponse getRequestByPaymentId(Long paymentId) {
+        if (paymentId == null) {
+            return null;
+        }
+
+        return remotePayRequestRepository.findDetailByPaymentId(paymentId)
+                .map(RemotePayCreateResponse::fromEntity)
+                .orElse(null);
+    }
+
     public RemotePayCreateResponse assignTarget(Long requesterUserId, Long requestId, RemotePayTargetAssignRequest targetRequest) {
         log.info("/api/v1/remote-pay/requests/{}/target Service", requestId);
 
@@ -305,6 +316,41 @@ public class RemotePayService {
         }
 
         sourcePayment.paidStatusUpdatePayment(completedAt);
+    }
+
+    @Transactional
+    public void cancelSourcePaymentIfNeeded(CoreEntity payerPayment, LocalDateTime canceledAt) {
+        if (payerPayment == null || payerPayment.getPayment_type() != CoreEntity.PaymentType.REMOTE) {
+            return;
+        }
+
+        RemotePayRequestEntity request = getRequestForPayment(payerPayment);
+        Long sourcePaymentId = request.getSource_payment_id();
+        if (sourcePaymentId == null
+                || sourcePaymentId.equals(payerPayment.getPaymentId())) {
+            return;
+        }
+
+        CoreEntity sourcePayment = coreRepository.findById(sourcePaymentId).orElse(null);
+        if (sourcePayment == null) {
+            log.warn("RemotePay source payment not found during cancel sync. requestId={}, sourcePaymentId={}",
+                    request.getRequest_id(),
+                    sourcePaymentId);
+            return;
+        }
+        if (sourcePayment.getPayment_status() == CoreEntity.PaymentStatus.CANCELED) {
+            return;
+        }
+        if (sourcePayment.getPayment_status() != CoreEntity.PaymentStatus.PAID
+                && sourcePayment.getPayment_status() != CoreEntity.PaymentStatus.PAY_PENDING) {
+            log.warn("RemotePay source payment status is not cancelable for sync. requestId={}, sourcePaymentId={}, status={}",
+                    request.getRequest_id(),
+                    sourcePaymentId,
+                    sourcePayment.getPayment_status());
+            return;
+        }
+
+        sourcePayment.voidedStatusUpdatePayment(canceledAt);
     }
 
     // [be] 영은 260527 1440 | Core가 PG 요청 직전에 호출해 취소/거절/만료된 원격결제가 결제되지 않도록 막는다.
