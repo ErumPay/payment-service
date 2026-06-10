@@ -110,6 +110,15 @@ public class RemotePayController {
         return ResponseEntity.ok(remotePayService.assignTarget(userId, request_id, request));
     }
 
+    @PostMapping("/api/v1/remote-pay/requests/{request_id}/accept")
+    public ResponseEntity<RemotePayCreateResponse> acceptRequest(
+            @RequestHeader("X-User-Id") @Positive Long userId,
+            @PathVariable("request_id") @Positive Long request_id) {
+        log.info("/api/v1/remote-pay/requests/{}/accept Controller", request_id);
+
+        return ResponseEntity.ok(remotePayService.acceptRequest(userId, request_id));
+    }
+
     // [be] 영은 260605 1530 | 대리결제자 Core /payment/prepare 이후 생성된 payer payment_id를 원격결제 요청에 연결한다.
     @PostMapping("/internal/v1/remote-pay/requests/{request_id}/payment")
     public ResponseEntity<RemotePayCreateResponse> connectPaymentFromCore(
