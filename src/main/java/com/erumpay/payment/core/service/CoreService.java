@@ -49,6 +49,7 @@ import com.erumpay.payment.core.domain.dto.request.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.request.PrepareRequest;
 import com.erumpay.payment.core.domain.dto.request.RemoteMemberPrepareRequest;
 import com.erumpay.payment.core.domain.dto.response.CanceledResponse;
+import com.erumpay.payment.core.domain.dto.response.CardPaymentHistoryResponse;
 import com.erumpay.payment.core.domain.dto.response.PaymentAllFetchResponse;
 import com.erumpay.payment.core.domain.dto.response.PaymentDetailResponse;
 import com.erumpay.payment.core.domain.dto.response.PaymentListResonse;
@@ -508,6 +509,30 @@ public class CoreService {
         RemotePayCreateResponse remoteRequest = remotePayService.getRequestByPaymentId(paymentId);
 
         return toPaymentDetailResponse(payment, cardDetails, userId, remoteRequest);
+    }
+
+    @Transactional(readOnly = true)
+    public CardPaymentHistoryResponse getCardPayment(Long userId, Long cardId) {
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
+        if (cardId == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        List<CardPaymentHistoryResponse.PaymentItem> payments = cardDetailRepository.findCardPaymentHistories(userId, cardId)
+                .stream()
+                .map(this::toCardPaymentHistoryItem)
+                .toList();
+
+        if (payments.isEmpty()) {
+            throw new CustomException(ErrorCode.PAYMENT_HISTORY_NOT_FOUND);
+        }
+
+        return CardPaymentHistoryResponse.builder()
+                .cardId(cardId)
+                .payments(payments)
+                .build();
     }
 
     // [be] 다윤 260605 20:00 | 사용자 미결제건 조회
@@ -1228,9 +1253,35 @@ public class CoreService {
                 .build();
     }
 
+    private CardPaymentHistoryResponse.PaymentItem toCardPaymentHistoryItem(
+            CardDetailRepository.CardPaymentHistoryProjection projection) {
+        return CardPaymentHistoryResponse.PaymentItem.builder()
+                .merchantName(projection.getMerchantName())
+                .paidAt(projection.getPaidAt())
+                .amount(nullToZero(projection.getAmount()))
+                .status(resolveCardPaymentHistoryStatus(projection.getCardStatus(), projection.getCancelStatus()))
+                .build();
+    }
+
     private Long nullToZero(Long value) {
         return value == null ? 0L : value;
     }
+
+    private String resolveCardPaymentHistoryStatus(String cardStatus, String cancelStatus) {
+    if (CardStatus.CANCEL_REQUESTED.name().equals(cardStatus)
+            || "REQUESTED".equals(cancelStatus)
+            || "PG_PENDING".equals(cancelStatus)) {
+        return "결제취소요청";
+    }
+    if (CardStatus.CANCELED.name().equals(cardStatus)
+            || "CANCELLED".equals(cancelStatus)) {
+        return "결제취소";
+    }
+    if (CardStatus.PAID.name().equals(cardStatus)) {
+        return "결제완료";
+    }
+    throw new CustomException(ErrorCode.PAYMENT_STATE_INVALID);
+}
 
     private PaymentDetailResponse toPaymentDetailResponse(
             CoreEntity payment,

@@ -12,6 +12,7 @@ import com.erumpay.payment.core.domain.dto.request.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.request.PrepareRequest;
 import com.erumpay.payment.core.domain.dto.request.RemoteMemberPrepareRequest;
 import com.erumpay.payment.core.domain.dto.response.CanceledResponse;
+import com.erumpay.payment.core.domain.dto.response.CardPaymentHistoryResponse;
 import com.erumpay.payment.core.domain.dto.response.PaymentDetailResponse;
 import com.erumpay.payment.core.domain.dto.response.PaymentListResonse;
 import com.erumpay.payment.core.domain.dto.response.PinAndPayResponse;
@@ -173,6 +174,16 @@ public class CoreController {
 
         log.info("/paymentId controller");
         return ResponseEntity.ok(coreService.getDetailPayment(userId, paymentId));
+    }
+
+    // [be] 다윤 260610 10:00 | 카드 1개에 대한 전체 결제 내역 조회
+    @GetMapping("/cards/{cardId}")
+    @Operation(summary = "카드별 결제 내역 조회", description = "카드 1개에 대한 전체 결제 내역을 조회한다.")
+    public ResponseEntity<CardPaymentHistoryResponse> getCardPayment(
+            @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
+            @Parameter(description = "카드 ID", required = true) @PathVariable("cardId") Long cardId) {
+        log.info("/payment/cards/{} controller", cardId);
+        return ResponseEntity.ok(coreService.getCardPayment(userId, cardId));
     }
 
 }
