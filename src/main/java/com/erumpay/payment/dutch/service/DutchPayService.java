@@ -36,6 +36,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostFinalPaymentResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteLinkResponse;
+import com.erumpay.payment.dutch.domain.dto.DutchPayInviteNotificationResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayMyPaymentResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequest;
@@ -51,6 +52,7 @@ import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity.DutchPayStatus;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity.SplitMethod;
 import com.erumpay.payment.notification.service.PaymentNotificationEventPublisher;
+import com.erumpay.payment.remote.service.RemotePayFriendValidator;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -74,6 +76,7 @@ public class DutchPayService {
     private final CoreRepository coreRepository;
     private final DutchPaySseService dutchPaySseService;
     private final PaymentNotificationEventPublisher notificationEventPublisher;
+    private final RemotePayFriendValidator friendValidator;
 
     // [be] 영은 260523 1120 | core에서 생성한 대표자 payment_id를 받아 더치페이 세션과 대표자 참여자 row를 만든다
     @Transactional
@@ -428,6 +431,37 @@ public class DutchPayService {
         return publishAndReturn(sessionId, "PARTICIPANTS_INVITED");
     }
 
+    @Transactional(readOnly = true)
+    public DutchPayInviteNotificationResponse sendInviteNotifications(
+            Long hostUserId,
+            Long sessionId,
+            DutchPayInviteRequest request) {
+        validateInviteRequest(hostUserId, sessionId, request);
+
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureHostInProgress(session, hostUserId);
+
+        Set<Long> uniqueUserIds = new HashSet<>(request.getUser_ids());
+        for (Long inviteeUserId : uniqueUserIds) {
+            validateInviteNotificationTarget(session, sessionId, hostUserId, inviteeUserId);
+        }
+
+        String inviteToken = createSignedInviteToken(sessionId);
+        String inviteUrl = "/api/v1/dutch-pay/invite-links/" + inviteToken + "/accept";
+        uniqueUserIds.forEach(inviteeUserId -> notificationEventPublisher.publishDutchInviteRequested(
+                sessionId,
+                inviteeUserId,
+                session.getOrder_name(),
+                inviteUrl));
+
+        return DutchPayInviteNotificationResponse.builder()
+                .session_id(sessionId)
+                .invite_token(inviteToken)
+                .invite_url(inviteUrl)
+                .notified_user_ids(uniqueUserIds.stream().toList())
+                .build();
+    }
+
     // [be] 영은 260523 1120 | 앱 밖 공유용 초대 링크에 session_id를 서명 토큰으로 감싸서 발급한다
     @Transactional(readOnly = true)
     public DutchPayInviteLinkResponse createInviteLink(Long hostUserId, Long sessionId) {
@@ -696,6 +730,21 @@ public class DutchPayService {
     }
 
     // [be] 영은 260523 1120 | 세션 조회 공통 처리
+    private void validateInviteNotificationTarget(
+            DutchPaySessionEntity session,
+            Long sessionId,
+            Long hostUserId,
+            Long inviteeUserId) {
+        if (inviteeUserId == null || inviteeUserId.equals(session.getHost_user_id())) {
+            throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
+        }
+        if (dutchPayParticipantRepository.existsBySessionIdAndUserId(sessionId, inviteeUserId)) {
+            throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
+        }
+
+        friendValidator.validate(hostUserId, inviteeUserId);
+    }
+
     private DutchPaySessionEntity getSessionOrThrow(Long sessionId) {
         if (sessionId == null) {
             throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);

@@ -117,6 +117,32 @@ public class PaymentNotificationEventPublisher {
                 orderName == null ? "더치페이 초대가 도착했습니다." : orderName + " 더치페이 초대가 도착했습니다.");
     }
 
+    public void publishDutchInviteRequested(Long sessionId, Long userId, String orderName, String inviteUrl) {
+        if (sessionId == null || userId == null) {
+            return;
+        }
+
+        String title = "더치페이 초대가 도착했습니다.";
+        String content = orderName == null
+                ? "더치페이 초대가 도착했습니다."
+                : orderName + " 더치페이 초대가 도착했습니다.";
+        String eventId = "dutch:%s:%d:%d:%d".formatted(
+                "DUTCHPAY_INVITED",
+                sessionId,
+                userId,
+                System.nanoTime());
+
+        publish(
+                paymentTopic,
+                eventId,
+                "DUTCHPAY_INVITED",
+                userId,
+                title,
+                content,
+                sessionId,
+                inviteUrl == null ? "dutch:%d".formatted(sessionId) : inviteUrl);
+    }
+
     public void publishDutchConfirmed(Long sessionId, Long userId, String orderName) {
         publishDutch(
                 paymentTopic,

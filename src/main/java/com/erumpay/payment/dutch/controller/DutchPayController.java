@@ -19,6 +19,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostFinalPaymentResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteLinkResponse;
+import com.erumpay.payment.dutch.domain.dto.DutchPayInviteNotificationResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayMyPaymentResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequest;
@@ -147,6 +148,16 @@ public class DutchPayController {
         log.info("/api/v1/dutch-pay/sessions/{}/invites Controller", session_id);
 
         return ResponseEntity.ok(dutchPayService.inviteAppFriends(userId, session_id, request));
+    }
+
+    @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/invite-notifications")
+    public ResponseEntity<DutchPayInviteNotificationResponse> sendInviteNotifications(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable("session_id") Long session_id,
+            @Valid @RequestBody DutchPayInviteRequest request) {
+        log.info("/api/v1/dutch-pay/sessions/{}/invite-notifications Controller", session_id);
+
+        return ResponseEntity.ok(dutchPayService.sendInviteNotifications(userId, session_id, request));
     }
 
     // [be] 영은 260523 1120 | 앱 밖 공유를 위한 서명된 초대 링크를 생성하는 API
