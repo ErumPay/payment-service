@@ -120,6 +120,20 @@ public class DutchPayParticipantEntity {
     }
 
     // [be] 영은 260523 1120 | CUSTOM 배분에서 참여자가 본인 부담 금액을 직접 입력하거나 수정한다
+    public void reopenInvite(LocalDateTime now) {
+        validateNow(now);
+
+        if (this.status != ParticipantStatus.REJECTED) {
+            throw new IllegalStateException("Only rejected participant can reopen invite");
+        }
+
+        this.status = ParticipantStatus.INVITED;
+        this.amount = null;
+        this.payment = null;
+        this.paid_at = null;
+        this.updated_at = now;
+    }
+
     public void updateAmount(Long amount, LocalDateTime now) {
         validateNow(now);
 

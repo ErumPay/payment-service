@@ -490,13 +490,22 @@ public class DutchPayService {
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
         ensureInProgress(session);
 
-        if (userId.equals(session.getHost_user_id())
-                || dutchPayParticipantRepository.existsBySessionIdAndUserId(sessionId, userId)) {
+        if (userId.equals(session.getHost_user_id())) {
             throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
         }
 
-        dutchPayParticipantRepository.save(
-                DutchPayParticipantEntity.invited(session, userId, null, LocalDateTime.now()));
+        DutchPayParticipantEntity existingParticipant = dutchPayParticipantRepository
+                .findParticipantForPaymentUpdate(sessionId, userId)
+                .orElse(null);
+        LocalDateTime now = LocalDateTime.now();
+        if (existingParticipant == null) {
+            dutchPayParticipantRepository.save(
+                    DutchPayParticipantEntity.invited(session, userId, null, now));
+        } else if (existingParticipant.getStatus() == ParticipantStatus.REJECTED) {
+            existingParticipant.reopenInvite(now);
+        } else {
+            throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
+        }
 
         return publishAndReturn(sessionId, "INVITE_LINK_ACCEPTED");
     }
