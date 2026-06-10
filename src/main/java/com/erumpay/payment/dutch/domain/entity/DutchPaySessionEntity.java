@@ -157,6 +157,18 @@ public class DutchPaySessionEntity {
         this.updated_at = now;
     }
 
+    public void cancel(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        if (this.status != DutchPayStatus.CREATED && this.status != DutchPayStatus.IN_PROGRESS) {
+            throw new IllegalStateException("Dutch pay session cannot be canceled from current status");
+        }
+
+        this.status = DutchPayStatus.CANCELED;
+        this.updated_at = now;
+    }
+
     public enum SplitMethod {
         EQUAL,
         CUSTOM
@@ -167,6 +179,7 @@ public class DutchPaySessionEntity {
         IN_PROGRESS,
         COMPLETED,
         TIMEOUT_HANDLED,
+        CANCELED,
         FAILED
     }
 }

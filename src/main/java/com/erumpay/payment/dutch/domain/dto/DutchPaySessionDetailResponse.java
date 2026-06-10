@@ -1,5 +1,7 @@
 package com.erumpay.payment.dutch.domain.dto;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 
@@ -15,6 +17,7 @@ import lombok.Getter;
 @Builder
 @Getter
 public class DutchPaySessionDetailResponse {
+    private static final Duration SESSION_EXPIRES_AFTER = Duration.ofMinutes(30);
 
     private Long session_id;
     private String dutch_order_no;
@@ -26,6 +29,8 @@ public class DutchPaySessionDetailResponse {
     private Long remaining_amount;
     private String split_method;
     private String status;
+    private LocalDateTime created_at;
+    private LocalDateTime expires_at;
     private String session_progress_step;
     private List<DutchPayParticipantResponse> participants;
 
@@ -48,6 +53,8 @@ public class DutchPaySessionDetailResponse {
                 .remaining_amount(session.getTotal_amount() - assignedAmount)
                 .split_method(session.getSplit_method().name())
                 .status(session.getStatus().name())
+                .created_at(session.getCreated_at())
+                .expires_at(session.getCreated_at() == null ? null : session.getCreated_at().plus(SESSION_EXPIRES_AFTER))
                 .participants(participants.stream()
                         .map(participant -> DutchPayParticipantResponse.fromEntity(participant, session.getHost_user_id()))
                         .toList())
@@ -66,6 +73,9 @@ public class DutchPaySessionDetailResponse {
         }
         if (session.getStatus() == DutchPayStatus.COMPLETED) {
             return ProgressStep.COMPLETED.name();
+        }
+        if (session.getStatus() == DutchPayStatus.CANCELED) {
+            return ProgressStep.CANCELED.name();
         }
         if (session.getStatus() == DutchPayStatus.TIMEOUT_HANDLED) {
             return hostAmount(session, participants) > 0
@@ -154,14 +164,15 @@ public class DutchPaySessionDetailResponse {
     }
 
     private enum ProgressStep {
-        GROUP_CREATED,          // 그룹 생성 직후 또는 대표자만 있는 단계
-        PARTICIPANT_CONFIRM,    // 참여자 초대/수락/인원 확정 대기 단계
-        AMOUNT_INPUT,           // CUSTOM 금액 입력 대기 단계
-        PAYMENT_REQUEST,        // 참여자 결제 요청 가능 단계
-        PAYMENT_IN_PROGRESS,    // 참여자 결제 진행 중 단계
-        FINAL_PAYMENT_REQUIRED, // 타임아웃 후 대표자 최종 결제 필요 단계
-        COMPLETED,              // 더치페이 정상 완료 단계
-        FAILED,                 // 더치페이 실패 단계
-        TIMEOUT_HANDLED         // 타임아웃 처리 완료 단계
+        GROUP_CREATED,
+        PARTICIPANT_CONFIRM,
+        AMOUNT_INPUT,
+        PAYMENT_REQUEST,
+        PAYMENT_IN_PROGRESS,
+        FINAL_PAYMENT_REQUIRED,
+        COMPLETED,
+        CANCELED,
+        FAILED,
+        TIMEOUT_HANDLED
     }
 }

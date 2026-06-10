@@ -27,11 +27,14 @@ public interface DutchPaySessionRepository extends JpaRepository<DutchPaySession
             left join DutchPayParticipantEntity p on p.session = s
             where s.status in :statuses
               and (s.host_user_id = :userId or p.user_id = :userId)
+              and (s.status <> :inProgressStatus or s.created_at > :timeoutThreshold)
             order by s.created_at desc
             """)
     List<DutchPaySessionEntity> findActiveSessionsByUserId(
             @Param("userId") Long userId,
-            @Param("statuses") List<DutchPayStatus> statuses);
+            @Param("statuses") List<DutchPayStatus> statuses,
+            @Param("inProgressStatus") DutchPayStatus inProgressStatus,
+            @Param("timeoutThreshold") LocalDateTime timeoutThreshold);
 
     // Locks one session while deciding whether participant payment callbacks can complete it.
     @Lock(LockModeType.PESSIMISTIC_WRITE)

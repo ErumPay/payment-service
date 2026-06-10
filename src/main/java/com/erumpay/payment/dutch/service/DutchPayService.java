@@ -396,7 +396,9 @@ public class DutchPayService {
 
         return dutchPaySessionRepository.findActiveSessionsByUserId(
                 userId,
-                List.of(DutchPayStatus.CREATED, DutchPayStatus.IN_PROGRESS, DutchPayStatus.TIMEOUT_HANDLED)).stream()
+                List.of(DutchPayStatus.CREATED, DutchPayStatus.IN_PROGRESS, DutchPayStatus.TIMEOUT_HANDLED),
+                DutchPayStatus.IN_PROGRESS,
+                LocalDateTime.now().minus(TIMEOUT_AFTER)).stream()
                 .map(session -> DutchPaySessionDetailResponse.fromEntity(
                         session,
                         getParticipants(session.getSession_id())))
@@ -522,6 +524,59 @@ public class DutchPayService {
         }
 
         return publishAndReturn(sessionId, "INVITE_REJECTED");
+    }
+
+    @Transactional
+    public DutchPaySessionDetailResponse cancelSession(Long hostUserId, Long sessionId) {
+        if (hostUserId == null || sessionId == null) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
+        }
+
+        DutchPaySessionEntity session = dutchPaySessionRepository.findByIdForUpdate(sessionId)
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND));
+        try {
+            session.requireHost(hostUserId);
+        } catch (IllegalStateException e) {
+            throw new CustomException(ErrorCode.DUTCH_HOST_ONLY_ACTION, e);
+        }
+
+        List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
+        validateNoLinkedParticipantPayments(participants);
+        try {
+            session.cancel(LocalDateTime.now());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw sessionStateException(session, e);
+        }
+
+        return publishAndReturn(sessionId, "SESSION_CANCELED");
+    }
+
+    @Transactional
+    public DutchPaySessionDetailResponse removeParticipant(Long hostUserId, Long sessionId, Long participantUserId) {
+        if (hostUserId == null || sessionId == null || participantUserId == null) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
+        }
+
+        DutchPaySessionEntity session = dutchPaySessionRepository.findByIdForUpdate(sessionId)
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND));
+        ensureHostInProgress(session, hostUserId);
+        if (participantUserId.equals(session.getHost_user_id())) {
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
+        }
+
+        List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
+        validateNoLinkedParticipantPayments(participants);
+
+        DutchPayParticipantEntity participant = dutchPayParticipantRepository
+                .findParticipantForPaymentUpdate(sessionId, participantUserId)
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
+        dutchPayParticipantRepository.delete(participant);
+        dutchPayParticipantRepository.flush();
+
+        List<DutchPayParticipantEntity> remainingParticipants = getParticipants(sessionId);
+        applySplitMethod(session, remainingParticipants, LocalDateTime.now());
+
+        return publishAndReturn(sessionId, "PARTICIPANT_REMOVED");
     }
 
     // [be] 영은 260523 1120 | 대표자가 인원을 확정하면 INVITED 참여자를 PENDING으로 전환한다
@@ -743,6 +798,16 @@ public class DutchPayService {
         }
 
         friendValidator.validate(hostUserId, inviteeUserId);
+    }
+
+    private void validateNoLinkedParticipantPayments(List<DutchPayParticipantEntity> participants) {
+        boolean hasLinkedPayment = participants.stream()
+                .anyMatch(participant -> participant.getPayment() != null
+                        || participant.getStatus() == ParticipantStatus.PAID
+                        || participant.getStatus() == ParticipantStatus.HOST_PAID);
+        if (hasLinkedPayment) {
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
+        }
     }
 
     private DutchPaySessionEntity getSessionOrThrow(Long sessionId) {
