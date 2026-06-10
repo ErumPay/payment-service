@@ -22,6 +22,10 @@ public class PaymentDetailResponse {
     private String paymentType;
     private String strategyType;
     private String status;
+    private Long remoteRequestId;
+    private Long requesterUserId;
+    private Long targetUserId;
+    private String remoteRole;
 
     private Long amount;
     private String orderName;

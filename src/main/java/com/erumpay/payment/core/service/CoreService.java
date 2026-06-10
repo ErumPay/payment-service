@@ -389,6 +389,7 @@ public class CoreService {
                 canceledAt,
                 resolveCanceledEventPgTxnId(cards),
                 payment.getPgGroupId());
+        remotePayService.cancelSourcePaymentIfNeeded(payment, canceledAt);
         notifyCardPaymentCanceled(payment, cards, canceledAt);
         coreNotificationEventPublisher.publishPaymentCanceled(
                 payment.getUserId(),
@@ -505,8 +506,9 @@ public class CoreService {
         validatePaymentOwner(payment, userId);
         validatePaymentHistoryStatus(payment);
         List<CardDetailEntity> cardDetails = cardDetailRepository.findAllByPaymentId(paymentId);
+        RemotePayCreateResponse remoteRequest = remotePayService.getRequestByPaymentId(paymentId);
 
-        return toPaymentDetailResponse(payment, cardDetails);
+        return toPaymentDetailResponse(payment, cardDetails, userId, remoteRequest);
     }
 
     @Transactional(readOnly = true)
@@ -1266,28 +1268,36 @@ public class CoreService {
     }
 
     private String resolveCardPaymentHistoryStatus(String cardStatus, String cancelStatus) {
-        if (CardStatus.CANCEL_REQUESTED.name().equals(cardStatus)
-                || "REQUESTED".equals(cancelStatus)
-                || "PG_PENDING".equals(cancelStatus)) {
-            return "결제취소요청";
-        }
-        if (CardStatus.CANCELED.name().equals(cardStatus)
-                || "CANCELLED".equals(cancelStatus)) {
-            return "결제취소";
-        }
-        if (CardStatus.PAID.name().equals(cardStatus)) {
-            return "결제완료";
-        }
-        throw new CustomException(ErrorCode.PAYMENT_STATE_INVALID);
+    if (CardStatus.CANCEL_REQUESTED.name().equals(cardStatus)
+            || "REQUESTED".equals(cancelStatus)
+            || "PG_PENDING".equals(cancelStatus)) {
+        return "결제취소요청";
     }
+    if (CardStatus.CANCELED.name().equals(cardStatus)
+            || "CANCELLED".equals(cancelStatus)) {
+        return "결제취소";
+    }
+    if (CardStatus.PAID.name().equals(cardStatus)) {
+        return "결제완료";
+    }
+    throw new CustomException(ErrorCode.PAYMENT_STATE_INVALID);
+}
 
-    private PaymentDetailResponse toPaymentDetailResponse(CoreEntity payment, List<CardDetailEntity> cardDetails) {
+    private PaymentDetailResponse toPaymentDetailResponse(
+            CoreEntity payment,
+            List<CardDetailEntity> cardDetails,
+            Long userId,
+            RemotePayCreateResponse remoteRequest) {
         return PaymentDetailResponse.builder()
                 .userId(payment.getUserId())
                 .paymentId(payment.getPaymentId())
                 .paymentType(payment.getPayment_type().name())
                 .strategyType(payment.getStrategy_type() == null ? null : payment.getStrategy_type().name())
                 .status(payment.getPayment_status().name())
+                .remoteRequestId(remoteRequest == null ? null : remoteRequest.getRequest_id())
+                .requesterUserId(remoteRequest == null ? null : remoteRequest.getRequester_user_id())
+                .targetUserId(remoteRequest == null ? null : remoteRequest.getTarget_user_id())
+                .remoteRole(resolveRemoteRole(userId, remoteRequest))
                 .amount(payment.getAmount())
                 .orderName(payment.getOrder_name())
                 .orderNo(payment.getOrder_no())
@@ -1297,6 +1307,19 @@ public class CoreService {
                         .map(this::toPaymentCardItem)
                         .toList())
                 .build();
+    }
+
+    private String resolveRemoteRole(Long userId, RemotePayCreateResponse remoteRequest) {
+        if (userId == null || remoteRequest == null) {
+            return null;
+        }
+        if (userId.equals(remoteRequest.getRequester_user_id())) {
+            return "REQUESTER";
+        }
+        if (userId.equals(remoteRequest.getTarget_user_id())) {
+            return "PAYER";
+        }
+        return null;
     }
 
     private PaymentDetailResponse.CardItem toPaymentCardItem(CardDetailEntity cardDetail) {
