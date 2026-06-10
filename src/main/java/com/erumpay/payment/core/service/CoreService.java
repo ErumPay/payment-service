@@ -1275,7 +1275,10 @@ public class CoreService {
                 || "CANCELLED".equals(cancelStatus)) {
             return "결제취소";
         }
-        return "결제완료";
+        if (CardStatus.PAID.name().equals(cardStatus)) {
+            return "결제완료";
+        }
+        throw new CustomException(ErrorCode.PAYMENT_STATE_INVALID);
     }
 
     private PaymentDetailResponse toPaymentDetailResponse(CoreEntity payment, List<CardDetailEntity> cardDetails) {

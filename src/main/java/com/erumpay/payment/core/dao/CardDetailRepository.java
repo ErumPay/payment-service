@@ -66,6 +66,17 @@ public interface CardDetailRepository extends JpaRepository<CardDetailEntity, Lo
                                order by coalesce(h.canceled_at, h.created_at) desc, h.cancel_id desc
                            ) as rn
                     from payment_cancel_history h
+                    join (
+                        select distinct scoped_c.payment_id,
+                                        scoped_c.pg_txn_id
+                        from payment_card_details scoped_c
+                        join payment_orders scoped_o
+                          on scoped_o.payment_id = scoped_c.payment_id
+                        where scoped_o.user_id = :userId
+                          and scoped_c.card_id = :cardId
+                    ) scoped
+                      on scoped.payment_id = h.payment_id
+                     and scoped.pg_txn_id = h.pg_txn_id
                 ) history
                 where history.rn = 1
             ) lc
@@ -73,6 +84,7 @@ public interface CardDetailRepository extends JpaRepository<CardDetailEntity, Lo
              and lc.pg_txn_id = c.pg_txn_id
             where o.user_id = :userId
               and c.card_id = :cardId
+              and c.card_status in ('PAID', 'CANCEL_REQUESTED', 'CANCELED')
             order by c.paid_at desc, c.payment_card_id desc
             """, nativeQuery = true)
     List<CardPaymentHistoryProjection> findCardPaymentHistories(
