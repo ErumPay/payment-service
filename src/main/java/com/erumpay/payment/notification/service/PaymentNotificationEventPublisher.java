@@ -118,6 +118,7 @@ public class PaymentNotificationEventPublisher {
     }
 
     public void publishDutchInviteRequested(Long sessionId, Long userId, String orderName, String inviteUrl) {
+        // [be] 영은 260610 | 알림 전용 더치 초대는 기존 notification-service 타입을 재사용하고 sessionId를 라우팅 값으로 전달한다.
         if (sessionId == null || userId == null) {
             return;
         }

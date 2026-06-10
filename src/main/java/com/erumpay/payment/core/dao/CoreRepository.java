@@ -19,6 +19,7 @@ public interface CoreRepository extends JpaRepository<CoreEntity, Long> {
         @Query("select count(o) > 0 from CoreEntity o where o.order_no = :orderNo")
         boolean existsByOrderNo(@Param("orderNo") String orderNo);
 
+        // [be] 영은 260610 | 원격결제 대리자 취소 시 요청자 원본 주문을 함께 갱신하므로 source payment를 비관적 락으로 조회한다.
         @Lock(LockModeType.PESSIMISTIC_WRITE)
         @Query("select o from CoreEntity o where o.paymentId = :paymentId")
         Optional<CoreEntity> findByIdForUpdate(@Param("paymentId") Long paymentId);
