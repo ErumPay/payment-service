@@ -331,7 +331,7 @@ public class RemotePayService {
             return;
         }
 
-        CoreEntity sourcePayment = coreRepository.findById(sourcePaymentId).orElse(null);
+        CoreEntity sourcePayment = coreRepository.findByIdForUpdate(sourcePaymentId).orElse(null);
         if (sourcePayment == null) {
             log.warn("RemotePay source payment not found during cancel sync. requestId={}, sourcePaymentId={}",
                     request.getRequest_id(),
