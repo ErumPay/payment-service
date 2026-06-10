@@ -44,7 +44,42 @@ public interface CardDetailRepository extends JpaRepository<CardDetailEntity, Lo
     @Query("select count(c) > 0 from CardDetailEntity c where c.payment_id = :paymentId and c.pg_txn_id = :pgTxnId")
     boolean existsByPaymentIdAndPgTxnId(@Param("paymentId") Long paymentId, @Param("pgTxnId") Long pgTxnId);
 
-            @Query("""
+    @Query(value = """
+            select coalesce(o.merchant_name, o.order_name) as merchantName,
+                   c.paid_at as paidAt,
+                   c.paid_amount as amount,
+                   c.card_status as cardStatus,
+                   lc.cancel_status as cancelStatus
+            from payment_card_details c
+            join payment_orders o
+              on o.payment_id = c.payment_id
+            left join (
+                select history.payment_id,
+                       history.pg_txn_id,
+                       history.cancel_status
+                from (
+                    select h.payment_id,
+                           h.pg_txn_id,
+                           h.cancel_status,
+                           row_number() over (
+                               partition by h.payment_id, h.pg_txn_id
+                               order by coalesce(h.canceled_at, h.created_at) desc, h.cancel_id desc
+                           ) as rn
+                    from payment_cancel_history h
+                ) history
+                where history.rn = 1
+            ) lc
+              on lc.payment_id = c.payment_id
+             and lc.pg_txn_id = c.pg_txn_id
+            where o.user_id = :userId
+              and c.card_id = :cardId
+            order by c.paid_at desc, c.payment_card_id desc
+            """, nativeQuery = true)
+    List<CardPaymentHistoryProjection> findCardPaymentHistories(
+            @Param("userId") Long userId,
+            @Param("cardId") Long cardId);
+
+    @Query("""
             select c.card_id as cardId,
                    count(distinct o.paymentId) as paymentCount,
                    coalesce(sum(c.paid_amount), 0) as paidAmount
@@ -71,5 +106,17 @@ public interface CardDetailRepository extends JpaRepository<CardDetailEntity, Lo
         Long getPaymentCount();
 
         Long getPaidAmount();
+    }
+
+    interface CardPaymentHistoryProjection {
+        String getMerchantName();
+
+        LocalDateTime getPaidAt();
+
+        Long getAmount();
+
+        String getCardStatus();
+
+        String getCancelStatus();
     }
 }
