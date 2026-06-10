@@ -389,6 +389,7 @@ public class CoreService {
                 canceledAt,
                 resolveCanceledEventPgTxnId(cards),
                 payment.getPgGroupId());
+        // [be] 영은 260610 | 대리결제자 결제 취소 성공 후 요청자 source payment도 같은 취소 상태로 동기화한다.
         remotePayService.cancelSourcePaymentIfNeeded(payment, canceledAt);
         notifyCardPaymentCanceled(payment, cards, canceledAt);
         coreNotificationEventPublisher.publishPaymentCanceled(
@@ -506,6 +507,7 @@ public class CoreService {
         validatePaymentOwner(payment, userId);
         validatePaymentHistoryStatus(payment);
         List<CardDetailEntity> cardDetails = cardDetailRepository.findAllByPaymentId(paymentId);
+        // [be] 영은 260610 | source payment와 payer payment 모두 같은 원격결제 요청 정보를 상세 응답에 포함한다.
         RemotePayCreateResponse remoteRequest = remotePayService.getRequestByPaymentId(paymentId);
 
         return toPaymentDetailResponse(payment, cardDetails, userId, remoteRequest);
@@ -1310,6 +1312,7 @@ public class CoreService {
     }
 
     private String resolveRemoteRole(Long userId, RemotePayCreateResponse remoteRequest) {
+        // [be] 영은 260610 | 프론트가 auth-service로 이름을 조회할 수 있도록 상세 응답에는 역할 구분만 내려준다.
         if (userId == null || remoteRequest == null) {
             return null;
         }

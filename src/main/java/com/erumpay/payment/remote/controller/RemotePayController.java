@@ -116,6 +116,7 @@ public class RemotePayController {
             @PathVariable("request_id") @Positive Long request_id) {
         log.info("/api/v1/remote-pay/requests/{}/accept Controller", request_id);
 
+        // [be] 영은 260610 | 원격결제 공유 URL 수신자가 결제하기 전에 DRAFT 요청을 PENDING으로 전환한다.
         return ResponseEntity.ok(remotePayService.acceptRequest(userId, request_id));
     }
 

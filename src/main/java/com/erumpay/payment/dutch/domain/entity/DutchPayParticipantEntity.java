@@ -121,6 +121,7 @@ public class DutchPayParticipantEntity {
 
     // [be] 영은 260523 1120 | CUSTOM 배분에서 참여자가 본인 부담 금액을 직접 입력하거나 수정한다
     public void reopenInvite(LocalDateTime now) {
+        // [be] 영은 260610 | 링크 재입장 시 unique 제약 때문에 REJECTED row를 새로 만들지 않고 초대 상태로 복구한다.
         validateNow(now);
 
         if (this.status != ParticipantStatus.REJECTED) {

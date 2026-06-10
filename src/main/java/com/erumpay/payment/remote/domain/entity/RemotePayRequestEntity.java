@@ -191,6 +191,7 @@ public class RemotePayRequestEntity {
     }
 
     public void acceptTarget(Long targetUserId, LocalDateTime now) {
+        // [be] 영은 260610 | 공유 링크 수신자가 DRAFT 요청을 직접 수락하면 본인을 대리결제자로 지정한다.
         if (targetUserId == null || now == null) {
             throw new IllegalArgumentException("targetUserId and now must not be null");
         }

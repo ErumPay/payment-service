@@ -158,6 +158,7 @@ public class DutchPayController {
             @Valid @RequestBody DutchPayInviteRequest request) {
         log.info("/api/v1/dutch-pay/sessions/{}/invite-notifications Controller", session_id);
 
+        // [be] 영은 260610 | 친구에게 알림만 보내고 실제 참여자는 링크 수락 시점에 생성한다.
         return ResponseEntity.ok(dutchPayService.sendInviteNotifications(userId, session_id, request));
     }
 
@@ -197,6 +198,7 @@ public class DutchPayController {
             @PathVariable("session_id") Long session_id) {
         log.info("/api/v1/dutch-pay/sessions/{}/cancel Controller", session_id);
 
+        // [be] 영은 260610 | 결제 시작 전 대표자가 더치페이 그룹을 서버 상태 기준으로 취소한다.
         return ResponseEntity.ok(dutchPayService.cancelSession(userId, session_id));
     }
 
@@ -207,6 +209,7 @@ public class DutchPayController {
             @PathVariable("participant_user_id") Long participant_user_id) {
         log.info("/api/v1/dutch-pay/sessions/{}/participants/{} Controller", session_id, participant_user_id);
 
+        // [be] 영은 260610 | 대표자가 결제 시작 전 참여자를 내보내고 남은 참여자 기준으로 금액을 다시 계산한다.
         return ResponseEntity.ok(dutchPayService.removeParticipant(userId, session_id, participant_user_id));
     }
 

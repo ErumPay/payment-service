@@ -438,6 +438,7 @@ public class DutchPayService {
             Long hostUserId,
             Long sessionId,
             DutchPayInviteRequest request) {
+        // [be] 영은 260610 | 체크박스 초대 알림은 보내되 participant row는 링크 수락 전까지 만들지 않는다.
         validateInviteRequest(hostUserId, sessionId, request);
 
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
@@ -482,6 +483,7 @@ public class DutchPayService {
     // [be] 영은 260523 1120 | 링크 수락 시 토큰을 검증하고 참여자를 INVITED 상태로 추가한다
     @Transactional
     public DutchPaySessionDetailResponse acceptInviteLink(Long userId, String inviteToken) {
+        // [be] 영은 260610 | 거절했던 사용자가 같은 링크로 재입장하면 기존 REJECTED row를 INVITED로 복구한다.
         if (userId == null || inviteToken == null || inviteToken.isBlank()) {
             throw new CustomException(ErrorCode.DUTCH_INVITE_TOKEN_INVALID);
         }
@@ -537,6 +539,7 @@ public class DutchPayService {
 
     @Transactional
     public DutchPaySessionDetailResponse cancelSession(Long hostUserId, Long sessionId) {
+        // [be] 영은 260610 | 대표자 그룹 취소는 결제 주문이 생기기 전까지만 허용해 PG 취소 범위를 만들지 않는다.
         if (hostUserId == null || sessionId == null) {
             throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
@@ -562,6 +565,7 @@ public class DutchPayService {
 
     @Transactional
     public DutchPaySessionDetailResponse removeParticipant(Long hostUserId, Long sessionId, Long participantUserId) {
+        // [be] 영은 260610 | 대표자 내보내기는 결제 시작 전 참여자만 대상으로 하고 삭제 후 배분 금액을 재계산한다.
         if (hostUserId == null || sessionId == null || participantUserId == null) {
             throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
@@ -810,6 +814,7 @@ public class DutchPayService {
     }
 
     private void validateNoLinkedParticipantPayments(List<DutchPayParticipantEntity> participants) {
+        // [be] 영은 260610 | 그룹 취소/내보내기가 이미 생성된 결제 주문을 유실하지 않도록 payment 연결 여부를 먼저 막는다.
         boolean hasLinkedPayment = participants.stream()
                 .anyMatch(participant -> participant.getPayment() != null
                         || participant.getStatus() == ParticipantStatus.PAID

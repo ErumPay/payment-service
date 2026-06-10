@@ -21,6 +21,7 @@ public interface DutchPaySessionRepository extends JpaRepository<DutchPaySession
     boolean existsByDutchOrderNo(@Param("dutchOrderNo") String dutchOrderNo);
 
     // [be] 영은 260523 1120 | 홈 화면 이어하기용으로 대표자/참여자에 해당하는 진행 중 세션을 조회한다
+    // [be] 영은 260610 | 홈 프로그레스바에는 30분이 지난 IN_PROGRESS 세션이 다시 보이지 않도록 active 조회에서 제외한다.
     @Query("""
             select distinct s
             from DutchPaySessionEntity s

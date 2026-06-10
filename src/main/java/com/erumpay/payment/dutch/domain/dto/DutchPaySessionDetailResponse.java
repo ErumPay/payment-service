@@ -29,6 +29,7 @@ public class DutchPaySessionDetailResponse {
     private Long remaining_amount;
     private String split_method;
     private String status;
+    // [be] 영은 260610 | 프론트가 더치페이 홈에서 만료 시간을 직접 보조 판단할 수 있도록 생성/만료 시각을 내려준다.
     private LocalDateTime created_at;
     private LocalDateTime expires_at;
     private String session_progress_step;

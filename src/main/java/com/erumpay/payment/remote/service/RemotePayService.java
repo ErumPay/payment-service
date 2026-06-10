@@ -139,6 +139,7 @@ public class RemotePayService {
 
     @Transactional(readOnly = true)
     public RemotePayCreateResponse getRequestByPaymentId(Long paymentId) {
+        // [be] 영은 260610 | 결제내역 상세 응답에서 source/payer payment 기준 원격결제 메타를 복원한다.
         if (paymentId == null) {
             return null;
         }
@@ -185,6 +186,7 @@ public class RemotePayService {
     public RemotePayCreateResponse acceptRequest(Long targetUserId, Long requestId) {
         log.info("/api/v1/remote-pay/requests/{}/accept Service", requestId);
 
+        // [be] 영은 260610 | URL 공유로 진입한 사용자가 target_user_id를 직접 점유한 뒤 기존 prepare-proxy 흐름으로 진행한다.
         if (targetUserId == null || requestId == null) {
             throw new CustomException(ErrorCode.RMT_INVALID_REQUEST);
         }
@@ -341,6 +343,7 @@ public class RemotePayService {
 
     @Transactional
     public void cancelSourcePaymentIfNeeded(CoreEntity payerPayment, LocalDateTime canceledAt) {
+        // [be] 영은 260610 | 대리결제 취소 결과가 요청자 원본 주문 상세에도 동일하게 보이도록 source payment를 취소 동기화한다.
         if (payerPayment == null || payerPayment.getPayment_type() != CoreEntity.PaymentType.REMOTE) {
             return;
         }
