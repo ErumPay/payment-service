@@ -79,11 +79,13 @@ public interface RemotePayRequestRepository extends JpaRepository<RemotePayReque
             left join fetch r.payment
             where (r.requester_user_id = :userId or r.target_user_id = :userId)
               and r.status in :statuses
+              and (r.expires_at is null or r.expires_at > :now)
             order by r.created_at desc
             """)
     List<RemotePayRequestEntity> findRequestsByUserIdAndStatuses(
             @Param("userId") Long userId,
-            @Param("statuses") List<RemotePayStatus> statuses);
+            @Param("statuses") List<RemotePayStatus> statuses,
+            @Param("now") LocalDateTime now);
 
     // [be] 영은 260528 1120 | 만료 시간이 지난 PENDING 요청을 비관적 락으로 잡아 배치 중복 처리와 결제 진입 경합을 막는다.
     @Lock(LockModeType.PESSIMISTIC_WRITE)
