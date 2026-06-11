@@ -21,17 +21,21 @@ public interface DutchPaySessionRepository extends JpaRepository<DutchPaySession
     boolean existsByDutchOrderNo(@Param("dutchOrderNo") String dutchOrderNo);
 
     // [be] 영은 260523 1120 | 홈 화면 이어하기용으로 대표자/참여자에 해당하는 진행 중 세션을 조회한다
+    // [be] 영은 260610 | 홈 프로그레스바에는 30분이 지난 IN_PROGRESS 세션이 다시 보이지 않도록 active 조회에서 제외한다.
     @Query("""
             select distinct s
             from DutchPaySessionEntity s
             left join DutchPayParticipantEntity p on p.session = s
             where s.status in :statuses
               and (s.host_user_id = :userId or p.user_id = :userId)
+              and (s.status <> :inProgressStatus or s.created_at > :timeoutThreshold)
             order by s.created_at desc
             """)
     List<DutchPaySessionEntity> findActiveSessionsByUserId(
             @Param("userId") Long userId,
-            @Param("statuses") List<DutchPayStatus> statuses);
+            @Param("statuses") List<DutchPayStatus> statuses,
+            @Param("inProgressStatus") DutchPayStatus inProgressStatus,
+            @Param("timeoutThreshold") LocalDateTime timeoutThreshold);
 
     // Locks one session while deciding whether participant payment callbacks can complete it.
     @Lock(LockModeType.PESSIMISTIC_WRITE)

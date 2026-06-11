@@ -21,6 +21,7 @@ import com.erumpay.payment.core.service.CoreValidationService;
 import com.erumpay.payment.merchant.domain.dto.MerchantCancelResponse;
 import com.erumpay.payment.merchant.domain.dto.MerchantPaymentRequest;
 import com.erumpay.payment.merchant.domain.dto.MerchantPaymentResponse;
+import com.erumpay.payment.notification.service.CoreNotificationEventPublisher;
 import com.erumpay.payment.qr.dao.QrRepository;
 import com.erumpay.payment.qr.domain.entity.QrEntity;
 import com.erumpay.payment.qr.service.QrService;
@@ -41,6 +42,7 @@ public class MerchantPaymentService {
     private final QrService qrService;
     private final CoreValidationService coreValidationService;
     private final PgClient pgClient;
+    private final CoreNotificationEventPublisher coreNotificationEventPublisher;
 
     @Value("${checkout.redirect-base-url}")
     private String checkoutRedirectBaseUrl;
@@ -136,6 +138,14 @@ public class MerchantPaymentService {
 
         LocalDateTime canceledAt = LocalDateTime.now();
         payment.voidedStatusUpdatePayment(canceledAt);
+        coreNotificationEventPublisher.publishPaymentCanceled(
+                payment.getUserId(),
+                payment.getPaymentId(),
+                payment.getOrder_name());
+        coreNotificationEventPublisher.publishPaymentSettlementCanceled(
+                payment.getMerchant_id(),
+                payment.getPaymentId(),
+                payment.getAmount());
 
         return MerchantCancelResponse.builder()
                 .paymentId(payment.getPaymentId())

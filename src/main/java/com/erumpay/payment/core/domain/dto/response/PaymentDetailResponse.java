@@ -1,4 +1,4 @@
-package com.erumpay.payment.core.domain.dto;
+package com.erumpay.payment.core.domain.dto.response;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -22,6 +22,11 @@ public class PaymentDetailResponse {
     private String paymentType;
     private String strategyType;
     private String status;
+    // [be] 영은 260610 | 원격결제 결제내역 상세 화면에서 요청자/대리결제자 역할과 연결 요청을 식별한다.
+    private Long remoteRequestId;
+    private Long requesterUserId;
+    private Long targetUserId;
+    private String remoteRole;
 
     private Long amount;
     private String orderName;

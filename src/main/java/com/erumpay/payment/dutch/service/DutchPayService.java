@@ -36,6 +36,7 @@ import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostAuthorizationResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayHostFinalPaymentResultRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteLinkResponse;
+import com.erumpay.payment.dutch.domain.dto.DutchPayInviteNotificationResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayInviteRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayMyPaymentResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentResultRequest;
@@ -51,6 +52,7 @@ import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity.DutchPayStatus;
 import com.erumpay.payment.dutch.domain.entity.DutchPaySessionEntity.SplitMethod;
 import com.erumpay.payment.notification.service.PaymentNotificationEventPublisher;
+import com.erumpay.payment.remote.service.RemotePayFriendValidator;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -74,6 +76,7 @@ public class DutchPayService {
     private final CoreRepository coreRepository;
     private final DutchPaySseService dutchPaySseService;
     private final PaymentNotificationEventPublisher notificationEventPublisher;
+    private final RemotePayFriendValidator friendValidator;
 
     // [be] 영은 260523 1120 | core에서 생성한 대표자 payment_id를 받아 더치페이 세션과 대표자 참여자 row를 만든다
     @Transactional
@@ -268,7 +271,7 @@ public class DutchPayService {
         }
 
         CoreEntity payment = coreRepository.findById(request.getPayment_id())
-                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_HOST_FINAL_PAYMENT_NOT_FOUND));
         if (!request.getUser_id().equals(payment.getUserId())) {
             throw new CustomException(ErrorCode.DUTCH_ACCESS_DENIED);
         }
@@ -393,7 +396,9 @@ public class DutchPayService {
 
         return dutchPaySessionRepository.findActiveSessionsByUserId(
                 userId,
-                List.of(DutchPayStatus.CREATED, DutchPayStatus.IN_PROGRESS, DutchPayStatus.TIMEOUT_HANDLED)).stream()
+                List.of(DutchPayStatus.CREATED, DutchPayStatus.IN_PROGRESS, DutchPayStatus.TIMEOUT_HANDLED),
+                DutchPayStatus.IN_PROGRESS,
+                LocalDateTime.now().minus(TIMEOUT_AFTER)).stream()
                 .map(session -> DutchPaySessionDetailResponse.fromEntity(
                         session,
                         getParticipants(session.getSession_id())))
@@ -428,6 +433,38 @@ public class DutchPayService {
         return publishAndReturn(sessionId, "PARTICIPANTS_INVITED");
     }
 
+    @Transactional(readOnly = true)
+    public DutchPayInviteNotificationResponse sendInviteNotifications(
+            Long hostUserId,
+            Long sessionId,
+            DutchPayInviteRequest request) {
+        // [be] 영은 260610 | 체크박스 초대 알림은 보내되 participant row는 링크 수락 전까지 만들지 않는다.
+        validateInviteRequest(hostUserId, sessionId, request);
+
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureHostInProgress(session, hostUserId);
+
+        Set<Long> uniqueUserIds = new HashSet<>(request.getUser_ids());
+        for (Long inviteeUserId : uniqueUserIds) {
+            validateInviteNotificationTarget(session, sessionId, hostUserId, inviteeUserId);
+        }
+
+        String inviteToken = createSignedInviteToken(sessionId);
+        String inviteUrl = "/api/v1/dutch-pay/invite-links/" + inviteToken + "/accept";
+        uniqueUserIds.forEach(inviteeUserId -> notificationEventPublisher.publishDutchInviteRequested(
+                sessionId,
+                inviteeUserId,
+                session.getOrder_name(),
+                inviteUrl));
+
+        return DutchPayInviteNotificationResponse.builder()
+                .session_id(sessionId)
+                .invite_token(inviteToken)
+                .invite_url(inviteUrl)
+                .notified_user_ids(uniqueUserIds.stream().toList())
+                .build();
+    }
+
     // [be] 영은 260523 1120 | 앱 밖 공유용 초대 링크에 session_id를 서명 토큰으로 감싸서 발급한다
     @Transactional(readOnly = true)
     public DutchPayInviteLinkResponse createInviteLink(Long hostUserId, Long sessionId) {
@@ -446,6 +483,7 @@ public class DutchPayService {
     // [be] 영은 260523 1120 | 링크 수락 시 토큰을 검증하고 참여자를 INVITED 상태로 추가한다
     @Transactional
     public DutchPaySessionDetailResponse acceptInviteLink(Long userId, String inviteToken) {
+        // [be] 영은 260610 | 거절했던 사용자가 같은 링크로 재입장하면 기존 REJECTED row를 INVITED로 복구한다.
         if (userId == null || inviteToken == null || inviteToken.isBlank()) {
             throw new CustomException(ErrorCode.DUTCH_INVITE_TOKEN_INVALID);
         }
@@ -454,13 +492,22 @@ public class DutchPayService {
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
         ensureInProgress(session);
 
-        if (userId.equals(session.getHost_user_id())
-                || dutchPayParticipantRepository.existsBySessionIdAndUserId(sessionId, userId)) {
+        if (userId.equals(session.getHost_user_id())) {
             throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
         }
 
-        dutchPayParticipantRepository.save(
-                DutchPayParticipantEntity.invited(session, userId, null, LocalDateTime.now()));
+        DutchPayParticipantEntity existingParticipant = dutchPayParticipantRepository
+                .findParticipantForPaymentUpdate(sessionId, userId)
+                .orElse(null);
+        LocalDateTime now = LocalDateTime.now();
+        if (existingParticipant == null) {
+            dutchPayParticipantRepository.save(
+                    DutchPayParticipantEntity.invited(session, userId, null, now));
+        } else if (existingParticipant.getStatus() == ParticipantStatus.REJECTED) {
+            existingParticipant.reopenInvite(now);
+        } else {
+            throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
+        }
 
         return publishAndReturn(sessionId, "INVITE_LINK_ACCEPTED");
     }
@@ -488,6 +535,61 @@ public class DutchPayService {
         }
 
         return publishAndReturn(sessionId, "INVITE_REJECTED");
+    }
+
+    @Transactional
+    public DutchPaySessionDetailResponse cancelSession(Long hostUserId, Long sessionId) {
+        // [be] 영은 260610 | 대표자 그룹 취소는 결제 주문이 생기기 전까지만 허용해 PG 취소 범위를 만들지 않는다.
+        if (hostUserId == null || sessionId == null) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
+        }
+
+        DutchPaySessionEntity session = dutchPaySessionRepository.findByIdForUpdate(sessionId)
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND));
+        try {
+            session.requireHost(hostUserId);
+        } catch (IllegalStateException e) {
+            throw new CustomException(ErrorCode.DUTCH_HOST_ONLY_ACTION, e);
+        }
+
+        List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
+        validateNoLinkedParticipantPayments(participants);
+        try {
+            session.cancel(LocalDateTime.now());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw sessionStateException(session, e);
+        }
+
+        return publishAndReturn(sessionId, "SESSION_CANCELED");
+    }
+
+    @Transactional
+    public DutchPaySessionDetailResponse removeParticipant(Long hostUserId, Long sessionId, Long participantUserId) {
+        // [be] 영은 260610 | 대표자 내보내기는 결제 시작 전 참여자만 대상으로 하고 삭제 후 배분 금액을 재계산한다.
+        if (hostUserId == null || sessionId == null || participantUserId == null) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
+        }
+
+        DutchPaySessionEntity session = dutchPaySessionRepository.findByIdForUpdate(sessionId)
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND));
+        ensureHostInProgress(session, hostUserId);
+        if (participantUserId.equals(session.getHost_user_id())) {
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
+        }
+
+        List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
+        validateNoLinkedParticipantPayments(participants);
+
+        DutchPayParticipantEntity participant = dutchPayParticipantRepository
+                .findParticipantForPaymentUpdate(sessionId, participantUserId)
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
+        dutchPayParticipantRepository.delete(participant);
+        dutchPayParticipantRepository.flush();
+
+        List<DutchPayParticipantEntity> remainingParticipants = getParticipants(sessionId);
+        applySplitMethod(session, remainingParticipants, LocalDateTime.now());
+
+        return publishAndReturn(sessionId, "PARTICIPANT_REMOVED");
     }
 
     // [be] 영은 260523 1120 | 대표자가 인원을 확정하면 INVITED 참여자를 PENDING으로 전환한다
@@ -696,6 +798,32 @@ public class DutchPayService {
     }
 
     // [be] 영은 260523 1120 | 세션 조회 공통 처리
+    private void validateInviteNotificationTarget(
+            DutchPaySessionEntity session,
+            Long sessionId,
+            Long hostUserId,
+            Long inviteeUserId) {
+        if (inviteeUserId == null || inviteeUserId.equals(session.getHost_user_id())) {
+            throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
+        }
+        if (dutchPayParticipantRepository.existsBySessionIdAndUserId(sessionId, inviteeUserId)) {
+            throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
+        }
+
+        friendValidator.validate(hostUserId, inviteeUserId);
+    }
+
+    private void validateNoLinkedParticipantPayments(List<DutchPayParticipantEntity> participants) {
+        // [be] 영은 260610 | 그룹 취소/내보내기가 이미 생성된 결제 주문을 유실하지 않도록 payment 연결 여부를 먼저 막는다.
+        boolean hasLinkedPayment = participants.stream()
+                .anyMatch(participant -> participant.getPayment() != null
+                        || participant.getStatus() == ParticipantStatus.PAID
+                        || participant.getStatus() == ParticipantStatus.HOST_PAID);
+        if (hasLinkedPayment) {
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
+        }
+    }
+
     private DutchPaySessionEntity getSessionOrThrow(Long sessionId) {
         if (sessionId == null) {
             throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
@@ -974,7 +1102,7 @@ public class DutchPayService {
                     .withoutPadding()
                     .encodeToString(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
-            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e);
+            throw new CustomException(ErrorCode.DUTCH_INTERNAL_ERROR, e);
         }
     }
 

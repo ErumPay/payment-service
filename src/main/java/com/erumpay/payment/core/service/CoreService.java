@@ -29,6 +29,7 @@ import com.erumpay.payment.core.client.auth.dto.AuthPinRequest;
 import com.erumpay.payment.core.client.auth.dto.AuthPinResponse;
 import com.erumpay.payment.core.client.card.CardClient;
 import com.erumpay.payment.core.client.card.CardFeignErrorMapper;
+import com.erumpay.payment.core.client.card.dto.MainCardResponse;
 import com.erumpay.payment.core.client.card.dto.PaymentResultRequest;
 import com.erumpay.payment.core.client.card.dto.PaymentResultResponse;
 import com.erumpay.payment.core.client.pg.PgClient;
@@ -42,31 +43,34 @@ import com.erumpay.payment.core.client.recommend.dto.RecommendRequest;
 import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
 import com.erumpay.payment.core.dao.CardDetailRepository;
 import com.erumpay.payment.core.dao.CoreRepository;
-import com.erumpay.payment.core.domain.dto.CanceledResponse;
-import com.erumpay.payment.core.domain.dto.CoreSseEventType;
-import com.erumpay.payment.core.domain.dto.DutchMemberPrepareRequest;
-import com.erumpay.payment.core.domain.dto.PaymentDetailResponse;
-import com.erumpay.payment.core.domain.dto.PaymentAllFetchRequest;
-import com.erumpay.payment.core.domain.dto.PaymentAllFetchResponse;
-import com.erumpay.payment.core.domain.dto.PaymentListResonse;
-import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
-import com.erumpay.payment.core.domain.dto.PinAndPayResponse;
-import com.erumpay.payment.core.domain.dto.PrepareRequest;
-import com.erumpay.payment.core.domain.dto.PrepareResponse;
-import com.erumpay.payment.core.domain.dto.RemoteMemberPrepareRequest;
-import com.erumpay.payment.core.domain.dto.UserWithdrawalResponse;
+import com.erumpay.payment.core.domain.dto.request.DutchMemberPrepareRequest;
+import com.erumpay.payment.core.domain.dto.request.PaymentAllFetchRequest;
+import com.erumpay.payment.core.domain.dto.request.PinAndPayRequest;
+import com.erumpay.payment.core.domain.dto.request.PrepareRequest;
+import com.erumpay.payment.core.domain.dto.request.RemoteMemberPrepareRequest;
+import com.erumpay.payment.core.domain.dto.response.CanceledResponse;
+import com.erumpay.payment.core.domain.dto.response.CardPaymentHistoryResponse;
+import com.erumpay.payment.core.domain.dto.response.PaymentAllFetchResponse;
+import com.erumpay.payment.core.domain.dto.response.PaymentDetailResponse;
+import com.erumpay.payment.core.domain.dto.response.PaymentListResonse;
+import com.erumpay.payment.core.domain.dto.response.PinAndPayResponse;
+import com.erumpay.payment.core.domain.dto.response.PrepareResponse;
+import com.erumpay.payment.core.domain.dto.response.UserWithdrawalResponse;
+import com.erumpay.payment.core.domain.dto.sse.CoreSseEventType;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity.CardStatus;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.domain.entity.EventEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
+import com.erumpay.payment.dutch.dao.DutchPaySessionRepository;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateRequest;
 import com.erumpay.payment.dutch.domain.dto.DutchPayCreateResponse;
 import com.erumpay.payment.dutch.domain.dto.DutchPayParticipantPaymentValidateRequest;
 import com.erumpay.payment.dutch.service.DutchPayService;
 import com.erumpay.payment.notification.service.CoreNotificationEventPublisher;
 import com.erumpay.payment.qr.service.QrService;
+import com.erumpay.payment.remote.dao.RemotePayRequestRepository;
 import com.erumpay.payment.remote.domain.dto.RemotePayCreateResponse;
 import com.erumpay.payment.remote.domain.dto.RemotePayDraftCreateRequest;
 import com.erumpay.payment.remote.service.RemotePayService;
@@ -93,6 +97,7 @@ public class CoreService {
     private static final String PG_ERROR_ALREADY_CANCELLED = "PAYMENT_ALREADY_CANCELLED";
     private static final String SPLIT_CANCEL_REASON = "사용자 요청으로 분할결제 전체 취소";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
+    private static final String RECOMMENDATION_STATUS_NOT_APPLICABLE = "NOT_APPLICABLE";
     private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
     private static final Duration RECOMMENDATION_CACHE_TTL = Duration.ofMinutes(30);
     private static final ZoneId PAYMENT_HISTORY_BUSINESS_ZONE = ZoneId.of("Asia/Seoul");
@@ -117,8 +122,10 @@ public class CoreService {
     private final AuthClient authClient;
     private final AuthFeignErrorMapper authFeignErrorMapper;
     private final DutchPayService dutchPayService;
+    private final DutchPaySessionRepository dutchPaySessionRepository;
     private final QrService qrService;
     private final RemotePayService remotePayService;
+    private final RemotePayRequestRepository remotePayRequestRepository;
     private final EntityManager entityManager;
     private final RecommendClient recommendClient;
     private final RecommendFeignErrorMapper recommendFeignErrorMapper;
@@ -164,6 +171,13 @@ public class CoreService {
         createDutchHostSessionIfNeeded(request.getPaymentId(), userId, payment, paymentType);
         createRemoteDraftIfNeeded(userId, payment, paymentType, now);
 
+        if (isDutchHostAuthOnly(payment)) {
+            publishMainCardResult(payment.getPaymentId(), userId);
+            return ResponseEntity.ok(toPrepareResponse(payment, RECOMMENDATION_STATUS_NOT_APPLICABLE));
+        }
+        if (paymentType == CoreEntity.PaymentType.REMOTE) {
+            return ResponseEntity.ok(toPrepareResponse(payment, RECOMMENDATION_STATUS_NOT_APPLICABLE));
+        }
         return finalizePrepare(payment, userId);
     }
 
@@ -296,6 +310,29 @@ public class CoreService {
                 payment.getUserId(),
                 payment.getPaymentId(),
                 payment.getOrder_name());
+        publishPaymentSettlementCompletedIfEligible(payment);
+    }
+
+    private void publishPaymentSettlementCompletedIfEligible(CoreEntity payment) {
+        if (payment.getMerchant_id() == null || payment.getAmount() == null) {
+            return;
+        }
+
+        coreNotificationEventPublisher.publishPaymentSettlementCompleted(
+                payment.getMerchant_id(),
+                payment.getPaymentId(),
+                payment.getAmount());
+    }
+
+    private void publishPaymentSettlementCanceledIfEligible(CoreEntity payment) {
+        if (payment.getMerchant_id() == null || payment.getAmount() == null) {
+            return;
+        }
+
+        coreNotificationEventPublisher.publishPaymentSettlementCanceled(
+                payment.getMerchant_id(),
+                payment.getPaymentId(),
+                payment.getAmount());
     }
 
     // [be] 다윤 260526 auth-service pin 인증 요청
@@ -352,11 +389,14 @@ public class CoreService {
                 canceledAt,
                 resolveCanceledEventPgTxnId(cards),
                 payment.getPgGroupId());
+        // [be] 영은 260610 | 대리결제자 결제 취소 성공 후 요청자 source payment도 같은 취소 상태로 동기화한다.
+        remotePayService.cancelSourcePaymentIfNeeded(payment, canceledAt);
         notifyCardPaymentCanceled(payment, cards, canceledAt);
         coreNotificationEventPublisher.publishPaymentCanceled(
                 payment.getUserId(),
                 payment.getPaymentId(),
                 payment.getOrder_name());
+        publishPaymentSettlementCanceledIfEligible(payment);
 
         return toCanceledResponse(payment.getPaymentId(), CoreEntity.PaymentStatus.CANCELED, canceledAt);
     }
@@ -467,8 +507,34 @@ public class CoreService {
         validatePaymentOwner(payment, userId);
         validatePaymentHistoryStatus(payment);
         List<CardDetailEntity> cardDetails = cardDetailRepository.findAllByPaymentId(paymentId);
+        // [be] 영은 260610 | source payment와 payer payment 모두 같은 원격결제 요청 정보를 상세 응답에 포함한다.
+        RemotePayCreateResponse remoteRequest = remotePayService.getRequestByPaymentId(paymentId);
 
-        return toPaymentDetailResponse(payment, cardDetails);
+        return toPaymentDetailResponse(payment, cardDetails, userId, remoteRequest);
+    }
+
+    @Transactional(readOnly = true)
+    public CardPaymentHistoryResponse getCardPayment(Long userId, Long cardId) {
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
+        if (cardId == null) {
+            throw new CustomException(ErrorCode.BAD_REQUEST);
+        }
+
+        List<CardPaymentHistoryResponse.PaymentItem> payments = cardDetailRepository.findCardPaymentHistories(userId, cardId)
+                .stream()
+                .map(this::toCardPaymentHistoryItem)
+                .toList();
+
+        if (payments.isEmpty()) {
+            throw new CustomException(ErrorCode.PAYMENT_HISTORY_NOT_FOUND);
+        }
+
+        return CardPaymentHistoryResponse.builder()
+                .cardId(cardId)
+                .payments(payments)
+                .build();
     }
 
     // [be] 다윤 260605 20:00 | 사용자 미결제건 조회
@@ -745,6 +811,50 @@ public class CoreService {
         return ResponseEntity.ok(toPrepareResponse(payment));
     }
 
+    private boolean isDutchHostAuthOnly(CoreEntity payment) {
+        return payment.getPayment_type() == CoreEntity.PaymentType.DUTCH
+                && payment.getPayment_intent() == CoreEntity.PaymentIntent.DUTCH_HOST_AUTH_ONLY_PAY;
+    }
+
+    private MainCardResponse getMainCardOrNull(Long userId) {
+        try {
+            return cardClient.mainCardRequest(userId);
+        } catch (FeignException e) {
+            ErrorCode mappedError = cardFeignErrorMapper.map(
+                    e,
+                    ErrorCode.CARD_REQUEST_INVALID,
+                    ErrorCode.CARD_INTERNAL_SERVER_ERROR);
+            log.warn("main card lookup failed. userId={}, status={}, mappedError={}, body={}",
+                    userId,
+                    e.status(),
+                    mappedError.name(),
+                    e.contentUTF8());
+            return null;
+        } catch (RuntimeException e) {
+            log.warn("main card lookup failed unexpectedly. userId={}", userId, e);
+            return null;
+        }
+    }
+
+    private void publishMainCardResult(Long paymentId, Long userId) {
+        MainCardResponse mainCard = getMainCardOrNull(userId);
+        if (mainCard == null) {
+            coreSseService.publishPaymentUpdated(
+                    paymentId,
+                    CoreSseEventType.MAIN_CARD_FAILED,
+                    Map.of(
+                            "status", "MAIN_CARD_FAILED",
+                            "userId", userId,
+                            "reason", "주카드 조회에 실패했습니다."));
+            return;
+        }
+
+        coreSseService.publishPaymentUpdated(
+                paymentId,
+                CoreSseEventType.MAIN_CARD_READY,
+                mainCard);
+    }
+
     private void validatePayRequestPreconditions(
             CoreEntity payment,
             Long userId,
@@ -758,6 +868,7 @@ public class CoreService {
         }
         validateAmountMatches(payment.getAmount(), request.getTotalAmount());
         coreValidationService.validateCardAmounts(request);
+        validateHostAuthOnlyCardSelection(payment, request);
         validateRemotePaymentRequestIfNeeded(payment);
     }
 
@@ -771,6 +882,18 @@ public class CoreService {
     private void validateRemotePaymentRequestIfNeeded(CoreEntity payment) {
         if (payment.getPayment_type() == CoreEntity.PaymentType.REMOTE) {
             remotePayService.validatePaymentCanBeRequested(payment);
+        }
+    }
+
+    private void validateHostAuthOnlyCardSelection(CoreEntity payment, PinAndPayRequest request) {
+        if (!isDutchHostAuthOnly(payment)) {
+            return;
+        }
+        if (request.getCards() == null || request.getCards().isEmpty()) {
+            throw new CustomException(ErrorCode.PAYMENT_CARD_LIST_REQUIRED);
+        }
+        if (request.getCards().size() > 1) {
+            throw new CustomException(ErrorCode.HOST_AUTH_ONLY_SINGLE_CARD_REQUIRED);
         }
     }
 
@@ -1132,17 +1255,51 @@ public class CoreService {
                 .build();
     }
 
+    private CardPaymentHistoryResponse.PaymentItem toCardPaymentHistoryItem(
+            CardDetailRepository.CardPaymentHistoryProjection projection) {
+        return CardPaymentHistoryResponse.PaymentItem.builder()
+                .merchantName(projection.getMerchantName())
+                .paidAt(projection.getPaidAt())
+                .amount(nullToZero(projection.getAmount()))
+                .status(resolveCardPaymentHistoryStatus(projection.getCardStatus(), projection.getCancelStatus()))
+                .build();
+    }
+
     private Long nullToZero(Long value) {
         return value == null ? 0L : value;
     }
 
-    private PaymentDetailResponse toPaymentDetailResponse(CoreEntity payment, List<CardDetailEntity> cardDetails) {
+    private String resolveCardPaymentHistoryStatus(String cardStatus, String cancelStatus) {
+    if (CardStatus.CANCEL_REQUESTED.name().equals(cardStatus)
+            || "REQUESTED".equals(cancelStatus)
+            || "PG_PENDING".equals(cancelStatus)) {
+        return "결제취소요청";
+    }
+    if (CardStatus.CANCELED.name().equals(cardStatus)
+            || "CANCELLED".equals(cancelStatus)) {
+        return "결제취소";
+    }
+    if (CardStatus.PAID.name().equals(cardStatus)) {
+        return "결제완료";
+    }
+    throw new CustomException(ErrorCode.PAYMENT_STATE_INVALID);
+}
+
+    private PaymentDetailResponse toPaymentDetailResponse(
+            CoreEntity payment,
+            List<CardDetailEntity> cardDetails,
+            Long userId,
+            RemotePayCreateResponse remoteRequest) {
         return PaymentDetailResponse.builder()
                 .userId(payment.getUserId())
                 .paymentId(payment.getPaymentId())
                 .paymentType(payment.getPayment_type().name())
                 .strategyType(payment.getStrategy_type() == null ? null : payment.getStrategy_type().name())
                 .status(payment.getPayment_status().name())
+                .remoteRequestId(remoteRequest == null ? null : remoteRequest.getRequest_id())
+                .requesterUserId(remoteRequest == null ? null : remoteRequest.getRequester_user_id())
+                .targetUserId(remoteRequest == null ? null : remoteRequest.getTarget_user_id())
+                .remoteRole(resolveRemoteRole(userId, remoteRequest))
                 .amount(payment.getAmount())
                 .orderName(payment.getOrder_name())
                 .orderNo(payment.getOrder_no())
@@ -1152,6 +1309,20 @@ public class CoreService {
                         .map(this::toPaymentCardItem)
                         .toList())
                 .build();
+    }
+
+    private String resolveRemoteRole(Long userId, RemotePayCreateResponse remoteRequest) {
+        // [be] 영은 260610 | 프론트가 auth-service로 이름을 조회할 수 있도록 상세 응답에는 역할 구분만 내려준다.
+        if (userId == null || remoteRequest == null) {
+            return null;
+        }
+        if (userId.equals(remoteRequest.getRequester_user_id())) {
+            return "REQUESTER";
+        }
+        if (userId.equals(remoteRequest.getTarget_user_id())) {
+            return "PAYER";
+        }
+        return null;
     }
 
     private PaymentDetailResponse.CardItem toPaymentCardItem(CardDetailEntity cardDetail) {
@@ -1169,10 +1340,14 @@ public class CoreService {
     }
 
     private PrepareResponse toPrepareResponse(CoreEntity payment) {
+        return toPrepareResponse(payment, RECOMMENDATION_STATUS_PENDING);
+    }
+
+    private PrepareResponse toPrepareResponse(CoreEntity payment, String recommendationStatus) {
         return PrepareResponse.builder()
                 .paymentId(payment.getPaymentId())
                 .paymentStatus(payment.getPayment_status() == null ? null : payment.getPayment_status().name())
-                .recommendationStatus(RECOMMENDATION_STATUS_PENDING)
+                .recommendationStatus(recommendationStatus)
                 .paymentType(payment.getPayment_type() == null ? null : payment.getPayment_type().name())
                 .paymentIntent(payment.getPayment_intent() == null ? null : payment.getPayment_intent().name())
                 .dutchRole(payment.getDutch_role() == null ? null : payment.getDutch_role().name())
@@ -1212,12 +1387,13 @@ public class CoreService {
             LocalDateTime now,
             CoreEntity.DutchRole dutchRole,
             CoreEntity.PaymentIntent paymentIntent) {
-        return CoreEntity.builder()
+        CoreEntity sourcePayment = findDutchSourcePayment(request.getSessionId());
+        CoreEntity payment = CoreEntity.builder()
                 .userId(userId)
-                .merchant_id(request.getMerchantId())
+                .merchant_id(sourcePayment.getMerchant_id())
                 .idempotencyKey(normalizedIdempotencyKey)
                 .order_no(qrService.generateUniqueOrderNo(now))
-                .order_name(request.getOrderName())
+                .order_name(sourcePayment.getOrder_name())
                 .amount(request.getAmount())
                 .payment_status(CoreEntity.PaymentStatus.CREATED)
                 .payment_type(CoreEntity.PaymentType.DUTCH)
@@ -1228,6 +1404,8 @@ public class CoreService {
                 .updatedAt(now)
                 .created_at(now)
                 .build();
+        copyMerchantInfo(payment, sourcePayment, now);
+        return payment;
     }
 
     private DutchPaymentSaveOutcome saveRemoteDeputyPaymentWithIdempotencyGuard(
@@ -1282,12 +1460,13 @@ public class CoreService {
             String normalizedIdempotencyKey,
             RemoteMemberPrepareRequest request,
             LocalDateTime now) {
-        return CoreEntity.builder()
+        CoreEntity sourcePayment = findRemoteSourcePayment(request.getRemoteRequestId());
+        CoreEntity payment = CoreEntity.builder()
                 .userId(userId)
-                .merchant_id(request.getMerchantId())
+                .merchant_id(sourcePayment.getMerchant_id())
                 .idempotencyKey(normalizedIdempotencyKey)
                 .order_no(qrService.generateUniqueOrderNo(now))
-                .order_name(request.getOrderName())
+                .order_name(sourcePayment.getOrder_name())
                 .amount(request.getAmount())
                 .payment_status(CoreEntity.PaymentStatus.CREATED)
                 .payment_type(CoreEntity.PaymentType.REMOTE)
@@ -1296,6 +1475,41 @@ public class CoreService {
                 .updatedAt(now)
                 .created_at(now)
                 .build();
+        copyMerchantInfo(payment, sourcePayment, now);
+        return payment;
+    }
+
+    private CoreEntity findDutchSourcePayment(Long sessionId) {
+        Long hostAuthPaymentId = dutchPaySessionRepository.findById(sessionId)
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_SESSION_NOT_FOUND))
+                .getHost_auth_payment_id();
+        if (hostAuthPaymentId == null) {
+            throw new CustomException(ErrorCode.DUTCH_HOST_AUTH_NOT_CREATED);
+        }
+        return coreRepository.findById(hostAuthPaymentId)
+                .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
+    }
+
+    private CoreEntity findRemoteSourcePayment(Long remoteRequestId) {
+        Long sourcePaymentId = remotePayRequestRepository.findById(remoteRequestId)
+                .orElseThrow(() -> new CustomException(ErrorCode.RMT_REQUEST_NOT_FOUND))
+                .getSource_payment_id();
+        if (sourcePaymentId == null) {
+            throw new CustomException(ErrorCode.RMT_SOURCE_PAYMENT_NOT_FOUND);
+        }
+        return coreRepository.findById(sourcePaymentId)
+                .orElseThrow(() -> new CustomException(ErrorCode.RMT_SOURCE_PAYMENT_NOT_FOUND));
+    }
+
+    private void copyMerchantInfo(CoreEntity targetPayment, CoreEntity sourcePayment, LocalDateTime now) {
+        targetPayment.updateMerchantInfo(
+                sourcePayment.getMerchant_name(),
+                sourcePayment.getBusiness_number(),
+                sourcePayment.getOwner_name(),
+                sourcePayment.getContact_phone(),
+                sourcePayment.getBusiness_address(),
+                sourcePayment.getMcc(),
+                now);
     }
 
     // [be] 다윤 260529 13:00 | 결제 카드추천 조합 요청
@@ -1305,9 +1519,9 @@ public class CoreService {
                     RecommendRequest.builder()
                             .paymentId(payment.getPaymentId())
                             .userId(userId)
-                            // .merchantName(payment.getMerchant_name())
-                            .merchantName("스타벅스 강남점")
-                            .mccCode("5814")
+                            .merchantName(payment.getMerchant_name())
+                            // .merchantName("스타벅스 강남점")
+                            .mccCode(payment.getMcc())
                             .amount(payment.getAmount())
                             .build());
 

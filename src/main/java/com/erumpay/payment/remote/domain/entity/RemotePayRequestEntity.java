@@ -190,6 +190,29 @@ public class RemotePayRequestEntity {
         this.updated_at = now;
     }
 
+    public void acceptTarget(Long targetUserId, LocalDateTime now) {
+        // [be] 영은 260610 | 공유 링크 수신자가 DRAFT 요청을 직접 수락하면 본인을 대리결제자로 지정한다.
+        if (targetUserId == null || now == null) {
+            throw new IllegalArgumentException("targetUserId and now must not be null");
+        }
+        if (this.requester_user_id.equals(targetUserId)) {
+            throw new IllegalArgumentException("requester and target must be different");
+        }
+        if (this.status != RemotePayStatus.DRAFT) {
+            throw new IllegalStateException("remote payment request target can be assigned only in draft status");
+        }
+        if (this.target_user_id != null && !this.target_user_id.equals(targetUserId)) {
+            throw new IllegalStateException("remote payment request already has another target");
+        }
+        if (this.expires_at != null && !this.expires_at.isAfter(now)) {
+            throw new IllegalStateException("remote payment request is expired");
+        }
+
+        this.target_user_id = targetUserId;
+        this.status = RemotePayStatus.PENDING;
+        this.updated_at = now;
+    }
+
     // 대리결제자가 만든 실제 결제 주문을 PENDING 원격결제 요청에 연결한다.
     // target_user_id, payment.userId, amount가 모두 맞아야 이후 결제 요청으로 넘어갈 수 있다.
     public void assignPayment(Long targetUserId, CoreEntity payment, LocalDateTime now) {

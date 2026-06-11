@@ -28,9 +28,9 @@ import com.erumpay.payment.core.client.pg.dto.PgSplitPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgSplitPayResponse;
 import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
 import com.erumpay.payment.core.dao.EventRepository;
-import com.erumpay.payment.core.domain.dto.CoreSseEventType;
-import com.erumpay.payment.core.domain.dto.PaidCardRequest;
-import com.erumpay.payment.core.domain.dto.PinAndPayRequest;
+import com.erumpay.payment.core.domain.dto.request.PaidCardRequest;
+import com.erumpay.payment.core.domain.dto.request.PinAndPayRequest;
+import com.erumpay.payment.core.domain.dto.sse.CoreSseEventType;
 import com.erumpay.payment.core.domain.entity.CardDetailEntity;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 import com.erumpay.payment.core.domain.entity.EventEntity;
@@ -61,6 +61,7 @@ public class CorePgPaymentService {
     private static final String PG_STATUS_FAILED = "FAILED";
     private static final String PG_STATUS_VOIDED = "VOIDED";
     private static final String CARD_EVENT_APPROVED = "APPROVED";
+    private static final String AUTH_ONLY_STRATEGY_TYPE = CoreEntity.StrategyType.PERF_SINGLE.name();
     private static final String HOST_AUTH_STATUS_AUTHORIZED = "AUTHORIZED";
     private static final String HOST_AUTH_STATUS_FAILED = "FAILED";
     private static final String PARTICIPANT_PAYMENT_STATUS_PAID = "PAID";
@@ -90,8 +91,9 @@ public class CorePgPaymentService {
 
         boolean useAuthOnly = shouldUseAuthOnly(payment);
 
-        RecommendResponse.Result selectedRecommendation = validateRecommendationSelection(payment.getPaymentId(),
-                request);
+        RecommendResponse.Result selectedRecommendation = useAuthOnly
+                ? null
+                : validateRecommendationSelection(payment.getPaymentId(), request);
 
         Map<Long, CardBillingKeyResponse> billingKeys = fetchBillingKeysOrThrow(payment, request.getCards());
 
@@ -107,8 +109,11 @@ public class CorePgPaymentService {
 
         if (useAuthOnly) {
             PgAuthPayResponse pgResponse = approvedPayments.get(0).pgResponse();
-            corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(payment.getPaymentId(), pgResponse);
-            notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
+            corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(
+                    payment.getPaymentId(),
+                    pgResponse,
+                    AUTH_ONLY_STRATEGY_TYPE);
+            notifyHostAuthorizationResultSafely(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
             publishAuthorizedEvent(payment.getPaymentId());
             return;
         }
@@ -578,7 +583,7 @@ public class CorePgPaymentService {
     // [be] 다윤 260601 20:00 | 결제 실패 시 원장기록, 가승인의 경우 더치에게 가승인 실패 전달
     private void markPaymentFailed(CoreEntity payment, PgAuthPayResponse pgResponse) {
         corePgPaymentPersistenceService.markFailedAndSaveEvent(payment.getPaymentId(), pgResponse);
-        notifyHostAuthorizationResultIfNeeded(payment, HOST_AUTH_STATUS_FAILED, pgResponse);
+        notifyHostAuthorizationResultSafely(payment, HOST_AUTH_STATUS_FAILED, pgResponse);
     }
 
     // [be] 다윤 260601 20:00 | SSE PG_PENDING push
@@ -984,6 +989,23 @@ public class CorePgPaymentService {
                         .status(status)
                         .fail_code(pgResponse == null ? null : pgResponse.getFailureCode())
                         .build());
+    }
+
+    private void notifyHostAuthorizationResultSafely(
+            CoreEntity payment,
+            String status,
+            PgAuthPayResponse pgResponse) {
+        try {
+            notifyHostAuthorizationResultIfNeeded(payment, status, pgResponse);
+        } catch (RuntimeException e) {
+            log.error("host authorization result notify failed. paymentId={}, sessionId={}, userId={}, status={}, failCode={}",
+                    payment == null ? null : payment.getPaymentId(),
+                    payment == null ? null : payment.getDutch_session_id(),
+                    payment == null ? null : payment.getUserId(),
+                    status,
+                    pgResponse == null ? null : pgResponse.getFailureCode(),
+                    e);
+        }
     }
 
     // [be] 다윤 260601 20:00 | 참여자 결제 완료 여부를 더치에게 전달
