@@ -157,6 +157,19 @@ public class DutchPaySessionEntity {
         this.updated_at = now;
     }
 
+    public void cancel(LocalDateTime now) {
+        // [be] 영은 260610 | 결제 주문이 생성되기 전 대표자가 그룹을 파기할 때 세션만 취소 상태로 전환한다.
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        if (this.status != DutchPayStatus.CREATED && this.status != DutchPayStatus.IN_PROGRESS) {
+            throw new IllegalStateException("Dutch pay session cannot be canceled from current status");
+        }
+
+        this.status = DutchPayStatus.CANCELED;
+        this.updated_at = now;
+    }
+
     public enum SplitMethod {
         EQUAL,
         CUSTOM
@@ -167,6 +180,7 @@ public class DutchPaySessionEntity {
         IN_PROGRESS,
         COMPLETED,
         TIMEOUT_HANDLED,
+        CANCELED,
         FAILED
     }
 }

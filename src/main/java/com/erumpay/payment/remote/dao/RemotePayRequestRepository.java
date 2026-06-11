@@ -42,6 +42,16 @@ public interface RemotePayRequestRepository extends JpaRepository<RemotePayReque
             @Param("requestId") Long requestId,
             @Param("userId") Long userId);
 
+    // [be] 영은 260610 | 결제 상세 응답에서 requester/source 주문과 payer 주문 모두 원격결제 메타를 내려주기 위한 조회이다.
+    @Query("""
+            select r
+            from RemotePayRequestEntity r
+            left join fetch r.payment p
+            where r.source_payment_id = :paymentId
+               or p.paymentId = :paymentId
+            """)
+    Optional<RemotePayRequestEntity> findDetailByPaymentId(@Param("paymentId") Long paymentId);
+
     // [be] 영은 260528 1330 | 대리결제자 payment_id 기준으로 원격결제 요청을 찾아 중복 연결/완료 처리를 막는다.
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
