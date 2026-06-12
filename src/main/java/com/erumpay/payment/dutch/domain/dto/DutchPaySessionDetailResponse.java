@@ -119,9 +119,13 @@ public class DutchPaySessionDetailResponse {
 
     // [be] 영은 260612 | 참여자 부담금이 모두 확정된 뒤, 대표자가 결제 요청하기를 눌렀는지로 대기/결제가능 단계를 구분한다.
     private static String paymentStep(DutchPaySessionEntity session) {
-        return session.getPayment_requested_at() != null
-                ? ProgressStep.PAYMENT_REQUESTED.name()
-                : ProgressStep.AMOUNT_CONFIRMED.name();
+        if (session.getPayment_requested_at() != null) {
+            return ProgressStep.PAYMENT_REQUESTED.name();
+        }
+
+        return session.getAmount_confirmed_at() != null
+                ? ProgressStep.AMOUNT_CONFIRMED.name()
+                : ProgressStep.AMOUNT_INPUT_COMPLETED.name();
     }
 
     private static boolean isHost(DutchPaySessionEntity session, DutchPayParticipantEntity participant) {
@@ -175,6 +179,7 @@ public class DutchPaySessionDetailResponse {
         GROUP_CREATED,          // 그룹 생성 직후 또는 대표자만 있는 단계
         PARTICIPANT_CONFIRM,    // 참여자 초대/수락/인원 확정 대기 단계
         AMOUNT_INPUT,           // CUSTOM 금액 입력 대기 단계
+        AMOUNT_INPUT_COMPLETED, // 모든 참여자 금액 입력 완료, 대표자 금액 확정 전 — 참여자는 수정 가능
         AMOUNT_CONFIRMED,       // 대표자 금액 확정, 결제 요청 전 — 참여자는 결제 버튼 없이 대기
         PAYMENT_REQUESTED,      // 대표자가 결제 요청 — 참여자 결제 진행 가능 단계
         PAYMENT_IN_PROGRESS,    // 참여자 결제 진행 중 단계

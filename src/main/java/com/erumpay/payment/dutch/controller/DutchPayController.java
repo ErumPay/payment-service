@@ -224,6 +224,16 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.confirmParticipants(userId, session_id, request));
     }
 
+    // [be] 260613 | 대표자가 참여자 입력 금액을 확정해 결제 요청 전 대기 단계로 전환하는 API
+    @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/amount-confirm")
+    public ResponseEntity<DutchPaySessionDetailResponse> confirmAmount(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable("session_id") Long session_id) {
+        log.info("/api/v1/dutch-pay/sessions/{}/amount-confirm Controller", session_id);
+
+        return ResponseEntity.ok(dutchPayService.confirmAmount(userId, session_id));
+    }
+
     // [be] 영은 260612 | 대표자가 참여자에게 결제 요청을 보내 결제 진행 단계로 전환하는 API
     @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/payment-request")
     public ResponseEntity<DutchPaySessionDetailResponse> requestPayment(

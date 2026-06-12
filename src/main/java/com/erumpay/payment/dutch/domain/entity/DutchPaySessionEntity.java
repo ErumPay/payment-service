@@ -45,6 +45,7 @@ public class DutchPaySessionEntity {
     private LocalDateTime timeout_at;
     private LocalDateTime warning_1_sent_at;
     private LocalDateTime warning_2_sent_at;
+    private LocalDateTime amount_confirmed_at;
     private LocalDateTime payment_requested_at;
     private LocalDateTime created_at;
     private LocalDateTime updated_at;
@@ -117,6 +118,19 @@ public class DutchPaySessionEntity {
 
         if (this.payment_requested_at == null) {
             this.payment_requested_at = now;
+            this.updated_at = now;
+        }
+    }
+
+    // [be] 260613 | 대표자가 참여자 입력 금액을 최종 확인한 시점을 기록한다. 여러 기기 polling 분기를 위해 결제 요청 전 단계와 분리한다.
+    public void confirmAmount(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        requireInProgress();
+
+        if (this.amount_confirmed_at == null) {
+            this.amount_confirmed_at = now;
             this.updated_at = now;
         }
     }
