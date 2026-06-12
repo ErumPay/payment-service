@@ -96,22 +96,36 @@ public class DutchPayParticipantEntity {
                 .build();
     }
 
-    // [be] 영은 260523 1120 | 대표자 인원 확정 후 초대 상태 참여자를 결제 대기 상태로 전환한다
+    // [be] 영은 260523 1120 | 대표자 인원 확정 후 그룹에 참여한 사용자를 결제 대기 상태로 전환한다
     public void confirm(LocalDateTime now) {
         validateNow(now);
 
-        if (this.status == ParticipantStatus.INVITED) {
+        if (this.status == ParticipantStatus.JOINED) {
             this.status = ParticipantStatus.PENDING;
             this.updated_at = now;
         }
+    }
+
+    // [be] 조보름 260613 | 초대 링크/알림 수락 시 초대 상태와 실제 참여 상태를 구분한다.
+    public void join(LocalDateTime now) {
+        validateNow(now);
+
+        if (this.status != ParticipantStatus.INVITED) {
+            throw new IllegalStateException("Only invited participant can join");
+        }
+
+        this.status = ParticipantStatus.JOINED;
+        this.updated_at = now;
     }
 
     // [be] 영은 260523 1120 | 초대 거절 시 참여자 상태와 입력 금액을 초기화한다
     public void reject(LocalDateTime now) {
         validateNow(now);
 
-        if (this.status != ParticipantStatus.INVITED && this.status != ParticipantStatus.PENDING) {
-            throw new IllegalStateException("Only invited or pending participant can reject");
+        if (this.status != ParticipantStatus.INVITED
+                && this.status != ParticipantStatus.JOINED
+                && this.status != ParticipantStatus.PENDING) {
+            throw new IllegalStateException("Only invited, joined, or pending participant can reject");
         }
 
         this.status = ParticipantStatus.REJECTED;
@@ -128,7 +142,7 @@ public class DutchPayParticipantEntity {
             throw new IllegalStateException("Only rejected participant can reopen invite");
         }
 
-        this.status = participantsConfirmed ? ParticipantStatus.PENDING : ParticipantStatus.INVITED;
+        this.status = participantsConfirmed ? ParticipantStatus.PENDING : ParticipantStatus.JOINED;
         this.amount = null;
         this.payment = null;
         this.paid_at = null;
@@ -274,8 +288,10 @@ public class DutchPayParticipantEntity {
                 || this.status == ParticipantStatus.HOST_PAID) {
             return;
         }
-        if (this.status != ParticipantStatus.PENDING && this.status != ParticipantStatus.INVITED) {
-            throw new IllegalStateException("Only invited or pending participant can be timed out");
+        if (this.status != ParticipantStatus.PENDING
+                && this.status != ParticipantStatus.INVITED
+                && this.status != ParticipantStatus.JOINED) {
+            throw new IllegalStateException("Only invited, joined, or pending participant can be timed out");
         }
 
         this.status = ParticipantStatus.TIMEOUT;
@@ -292,6 +308,7 @@ public class DutchPayParticipantEntity {
 
     public enum ParticipantStatus {
         INVITED,
+        JOINED,
         REJECTED,
         PENDING,
         PAID,

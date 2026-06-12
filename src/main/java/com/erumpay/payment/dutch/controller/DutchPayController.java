@@ -182,6 +182,16 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.acceptInviteLink(userId, invite_token));
     }
 
+    // [be] 조보름 260613 | 알림/메인에서 더치페이 초대를 열 때 기존 INVITED 참여자를 JOINED로 전환한다.
+    @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/participants/join")
+    public ResponseEntity<DutchPaySessionDetailResponse> joinInvitedParticipant(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable("session_id") Long session_id) {
+        log.info("/api/v1/dutch-pay/sessions/{}/participants/join Controller", session_id);
+
+        return ResponseEntity.ok(dutchPayService.joinInvitedParticipant(userId, session_id));
+    }
+
     // [be] 영은 260523 1120 | 참여자가 초대를 거절하고 CUSTOM이면 대표자 부담금을 다시 계산하는 API
     @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/reject")
     public ResponseEntity<DutchPaySessionDetailResponse> rejectInvite(

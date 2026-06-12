@@ -86,7 +86,10 @@ public class DutchPaySessionDetailResponse {
         if (participants == null || participants.size() <= 1) {
             return ProgressStep.GROUP_CREATED.name();
         }
-        if (participants.stream().anyMatch(participant -> participant.getStatus() == ParticipantStatus.INVITED)) {
+        if (session.getParticipants_confirmed_at() == null
+                && participants.stream().anyMatch(participant ->
+                        participant.getStatus() == ParticipantStatus.INVITED
+                                || participant.getStatus() == ParticipantStatus.JOINED)) {
             return ProgressStep.PARTICIPANT_CONFIRM.name();
         }
         if (session.getSplit_method() == SplitMethod.CUSTOM

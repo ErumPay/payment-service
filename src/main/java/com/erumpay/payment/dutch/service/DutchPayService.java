@@ -506,10 +506,10 @@ public class DutchPayService {
                 .build();
     }
 
-    // [be] 영은 260523 1120 | 링크 수락 시 토큰을 검증하고 참여자를 INVITED 상태로 추가한다
+    // [be] 영은 260523 1120 | 링크 수락 시 토큰을 검증하고 참여자를 JOINED 상태로 추가한다
     @Transactional
     public DutchPaySessionDetailResponse acceptInviteLink(Long userId, String inviteToken) {
-        // [be] 영은 260610 | 거절했던 사용자가 같은 링크로 재입장하면 기존 REJECTED row를 INVITED로 복구한다.
+        // [be] 영은 260610 | 거절했던 사용자가 같은 링크로 재입장하면 기존 REJECTED row를 참여 상태로 복구한다.
         if (userId == null || inviteToken == null || inviteToken.isBlank()) {
             throw new CustomException(ErrorCode.DUTCH_INVITE_TOKEN_INVALID);
         }
@@ -527,8 +527,11 @@ public class DutchPayService {
                 .orElse(null);
         LocalDateTime now = LocalDateTime.now();
         if (existingParticipant == null) {
-            dutchPayParticipantRepository.save(
-                    DutchPayParticipantEntity.invited(session, userId, null, now));
+            DutchPayParticipantEntity participant = DutchPayParticipantEntity.invited(session, userId, null, now);
+            participant.join(now);
+            dutchPayParticipantRepository.save(participant);
+        } else if (existingParticipant.getStatus() == ParticipantStatus.INVITED) {
+            existingParticipant.join(now);
         } else if (existingParticipant.getStatus() == ParticipantStatus.REJECTED) {
             ensureRejectedParticipantCanRejoin(session);
             existingParticipant.reopenInvite(now, session.getParticipants_confirmed_at() != null);
@@ -537,6 +540,32 @@ public class DutchPayService {
         }
 
         return publishAndReturn(sessionId, "INVITE_LINK_ACCEPTED");
+    }
+
+    // [be] 조보름 260613 | 알림/메인에서 토큰 없이 진입한 초대 참여자를 실제 참여 상태로 전환한다.
+    @Transactional
+    public DutchPaySessionDetailResponse joinInvitedParticipant(Long userId, Long sessionId) {
+        if (userId == null || sessionId == null) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
+        }
+
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureInProgress(session);
+        if (userId.equals(session.getHost_user_id())) {
+            throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
+        }
+
+        DutchPayParticipantEntity participant = dutchPayParticipantRepository
+                .findParticipantForPaymentUpdate(sessionId, userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
+        if (participant.getStatus() == ParticipantStatus.INVITED) {
+            participant.join(LocalDateTime.now());
+        } else if (participant.getStatus() != ParticipantStatus.JOINED
+                && participant.getStatus() != ParticipantStatus.PENDING) {
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
+        }
+
+        return publishAndReturn(sessionId, "INVITE_JOINED");
     }
 
     // [be] 영은 260523 1120 | 참여자가 초대를 거절하면 REJECTED로 바꾸고 CUSTOM 금액은 다시 계산한다
@@ -633,11 +662,19 @@ public class DutchPayService {
         if (participants.isEmpty()) {
             throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND);
         }
+        boolean hasJoinedMember = participants.stream()
+                .anyMatch(participant ->
+                        !participant.getUser_id().equals(session.getHost_user_id())
+                                && participant.getStatus() == ParticipantStatus.JOINED);
+        if (!hasJoinedMember) {
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND);
+        }
 
         session.confirmParticipants(now);
         participants.forEach(participant -> participant.confirm(now));
         participants.stream()
                 .filter(participant -> !participant.getUser_id().equals(session.getHost_user_id()))
+                .filter(participant -> participant.getStatus() == ParticipantStatus.PENDING)
                 .forEach(participant -> notificationEventPublisher.publishDutchConfirmed(
                         sessionId,
                         participant.getUser_id(),
