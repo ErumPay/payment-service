@@ -180,6 +180,7 @@ public class DutchPaySessionDetailResponse {
         PAYMENT_IN_PROGRESS,    // 참여자 결제 진행 중 단계
         FINAL_PAYMENT_REQUIRED, // 타임아웃 후 대표자 최종 결제 필요 단계
         COMPLETED,              // 더치페이 정상 완료 단계
+        CANCELED,               // 대표자가 더치페이를 취소한 단계
         FAILED,                 // 더치페이 실패 단계
         TIMEOUT_HANDLED         // 타임아웃 처리 완료 단계
     }
