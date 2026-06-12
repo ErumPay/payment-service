@@ -174,10 +174,9 @@ public class MerchantPaymentService {
         try {
             merchant = merchantClient.merchantInfoRequest(merchantId);
         } catch (FeignException e) {
-            log.error("merchant-service call failed during merchant payment create. merchantId={}, status={}, body={}",
+            log.error("merchant-service call failed during merchant payment create. merchantId={}, status={}",
                     merchantId,
                     e.status(),
-                    e.contentUTF8(),
                     e);
             throw e;
         }
@@ -237,13 +236,11 @@ public class MerchantPaymentService {
 
     private void logMerchantInfoResponse(String flow, Long requestedMerchantId, MerchantResponse merchant) {
         log.info(
-                "Merchant info response. flow={}, requestedMerchantId={}, responseMerchantId={}, merchantName={}, mccCode={}, businessNumber={}, ownerName={}",
+                "Merchant info response. flow={}, requestedMerchantId={}, responseMerchantId={}, hasMerchantName={}, hasMccCode={}",
                 flow,
                 requestedMerchantId,
                 merchant == null ? null : merchant.getMerchantId(),
-                merchant == null ? null : merchant.getMerchantName(),
-                merchant == null ? null : merchant.getMccCode(),
-                merchant == null ? null : merchant.getBusinessNumber(),
-                merchant == null ? null : merchant.getOwnerName());
+                merchant != null && merchant.getMerchantName() != null && !merchant.getMerchantName().isBlank(),
+                merchant != null && merchant.getMccCode() != null && !merchant.getMccCode().isBlank());
     }
 }

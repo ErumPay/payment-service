@@ -70,10 +70,9 @@ public class QrService {
                 try {
                         merchant = merchantClient.merchantInfoRequest(request.getMerchant_id());
                 } catch (FeignException e) {
-                        log.error("merchant-service call failed during QR create. merchantId={}, status={}, body={}",
+                        log.error("merchant-service call failed during QR create. merchantId={}, status={}",
                                         request.getMerchant_id(),
                                         e.status(),
-                                        e.contentUTF8(),
                                         e);
                         throw e;
                 }
@@ -205,23 +204,25 @@ public class QrService {
                                 || merchant.getMerchantName().isBlank()
                                 || merchant.getMccCode() == null
                                 || merchant.getMccCode().isBlank()) {
-                        log.warn("Merchant info validation failed. responseMerchantId={}, merchantName={}, mccCode={}",
+                        log.warn("Merchant info validation failed. responseMerchantId={}, hasMerchantName={}, hasMccCode={}",
                                         merchant == null ? null : merchant.getMerchantId(),
-                                        merchant == null ? null : merchant.getMerchantName(),
-                                        merchant == null ? null : merchant.getMccCode());
+                                        merchant != null && merchant.getMerchantName() != null
+                                                        && !merchant.getMerchantName().isBlank(),
+                                        merchant != null && merchant.getMccCode() != null
+                                                        && !merchant.getMccCode().isBlank());
                         throw new CustomException(ErrorCode.MERCHANT_AUTH_UNAVAILABLE);
                 }
         }
 
         private void logMerchantInfoResponse(String flow, Long requestedMerchantId, MerchantResponse merchant) {
                 log.info(
-                                "Merchant info response. flow={}, requestedMerchantId={}, responseMerchantId={}, merchantName={}, mccCode={}, businessNumber={}, ownerName={}",
+                                "Merchant info response. flow={}, requestedMerchantId={}, responseMerchantId={}, hasMerchantName={}, hasMccCode={}",
                                 flow,
                                 requestedMerchantId,
                                 merchant == null ? null : merchant.getMerchantId(),
-                                merchant == null ? null : merchant.getMerchantName(),
-                                merchant == null ? null : merchant.getMccCode(),
-                                merchant == null ? null : merchant.getBusinessNumber(),
-                                merchant == null ? null : merchant.getOwnerName());
+                                merchant != null && merchant.getMerchantName() != null
+                                                && !merchant.getMerchantName().isBlank(),
+                                merchant != null && merchant.getMccCode() != null
+                                                && !merchant.getMccCode().isBlank());
         }
 }
