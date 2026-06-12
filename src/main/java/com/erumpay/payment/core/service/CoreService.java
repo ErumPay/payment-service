@@ -43,6 +43,7 @@ import com.erumpay.payment.core.client.recommend.dto.RecommendRequest;
 import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
 import com.erumpay.payment.core.dao.CardDetailRepository;
 import com.erumpay.payment.core.dao.CoreRepository;
+import com.erumpay.payment.core.domain.dto.request.DirectPinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.request.DutchMemberPrepareRequest;
 import com.erumpay.payment.core.domain.dto.request.PaymentAllFetchRequest;
 import com.erumpay.payment.core.domain.dto.request.PinAndPayRequest;
@@ -295,6 +296,34 @@ public class CoreService {
         corePgPaymentService.requestPgPayments(payment, request);
 
         // REQUIRES_NEW 트랜잭션에서 커밋된 최종 결제 상태를 응답에 반영한다.
+        entityManager.refresh(payment);
+        publishPaymentCompletedIfPaid(payment);
+
+        return ResponseEntity.ok(toPinAndPayResponse(payment));
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public ResponseEntity<PinAndPayResponse> requestDirectPay(
+            Long userId,
+            String idempotencyKey,
+            DirectPinAndPayRequest request) {
+        log.info("/payment/request-direct Service");
+
+        if (request == null) {
+            throw new CustomException(ErrorCode.PAYMENT_REQUEST_BODY_INVALID);
+        }
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
+        String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
+        CoreEntity payment = findPaymentOrThrow(request.getPaymentId());
+
+        validateDirectPayRequestPreconditions(payment, userId, normalizedIdempotencyKey, request);
+
+        verifyPin(userId, request.getPin());
+
+        corePgPaymentService.requestDirectPgPayment(payment, request);
+
         entityManager.refresh(payment);
         publishPaymentCompletedIfPaid(payment);
 
@@ -869,6 +898,21 @@ public class CoreService {
         validateAmountMatches(payment.getAmount(), request.getTotalAmount());
         coreValidationService.validateCardAmounts(request);
         validateHostAuthOnlyCardSelection(payment, request);
+        validateRemotePaymentRequestIfNeeded(payment);
+    }
+
+    private void validateDirectPayRequestPreconditions(
+            CoreEntity payment,
+            Long userId,
+            String normalizedIdempotencyKey,
+            DirectPinAndPayRequest request) {
+        validatePaymentOwner(payment, userId);
+        validateIdempotencyKeyMatches(payment, normalizedIdempotencyKey);
+        coreValidationService.validateRequestStatus(payment.getPayment_status());
+        if (request.getPin() == null || request.getPin().isBlank()) {
+            throw new CustomException(ErrorCode.PAYMENT_PIN_REQUIRED);
+        }
+        validateAmountMatches(payment.getAmount(), request.getTotalAmount());
         validateRemotePaymentRequestIfNeeded(payment);
     }
 

@@ -28,6 +28,7 @@ import com.erumpay.payment.core.client.pg.dto.PgSplitPayRequest;
 import com.erumpay.payment.core.client.pg.dto.PgSplitPayResponse;
 import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
 import com.erumpay.payment.core.dao.EventRepository;
+import com.erumpay.payment.core.domain.dto.request.DirectPinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.request.PaidCardRequest;
 import com.erumpay.payment.core.domain.dto.request.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.sse.CoreSseEventType;
@@ -119,7 +120,46 @@ public class CorePgPaymentService {
             return;
         }
 
-        markPaymentSucceeded(payment, approvedPayments, selectedRecommendation);
+        markPaymentSucceeded(
+                payment,
+                approvedPayments,
+                selectedRecommendation.getStrategyType(),
+                selectedRecommendation);
+        publishPaidEvent(payment.getPaymentId());
+    }
+
+    public void requestDirectPgPayment(CoreEntity payment, DirectPinAndPayRequest request) {
+        String savedIdempotencyKey = payment.getIdempotencyKey();
+        if (savedIdempotencyKey == null || savedIdempotencyKey.isBlank()) {
+            throw new CustomException(ErrorCode.PAYMENT_STATE_INVALID);
+        }
+
+        boolean useAuthOnly = shouldUseAuthOnly(payment);
+        PinAndPayRequest directRequest = toDirectCardRequest(request);
+        Map<Long, CardBillingKeyResponse> billingKeys = fetchBillingKeysOrThrow(payment, directRequest.getCards());
+
+        corePgPaymentPersistenceService.markPgPendingAndSaveEvent(payment.getPaymentId(), EventEntity.ActorType.SYSTEM);
+        publishPendingEvent(payment.getPaymentId());
+
+        List<ApprovedCardPayment> approvedPayments = requestApprovedCardPayments(
+                payment,
+                directRequest,
+                billingKeys,
+                savedIdempotencyKey,
+                useAuthOnly);
+
+        if (useAuthOnly) {
+            PgAuthPayResponse pgResponse = approvedPayments.get(0).pgResponse();
+            corePgPaymentPersistenceService.markAuthorizedAndSaveEvent(
+                    payment.getPaymentId(),
+                    pgResponse,
+                    AUTH_ONLY_STRATEGY_TYPE);
+            notifyHostAuthorizationResultSafely(payment, HOST_AUTH_STATUS_AUTHORIZED, pgResponse);
+            publishAuthorizedEvent(payment.getPaymentId());
+            return;
+        }
+
+        markPaymentSucceeded(payment, approvedPayments, AUTH_ONLY_STRATEGY_TYPE, null);
         publishPaidEvent(payment.getPaymentId());
     }
 
@@ -543,6 +583,7 @@ public class CorePgPaymentService {
     private void markPaymentSucceeded(
             CoreEntity payment,
             List<ApprovedCardPayment> approvedPayments,
+            String strategyType,
             RecommendResponse.Result selectedRecommendation) {
         if (approvedPayments.isEmpty()) {
             throw new CustomException(ErrorCode.PG_RESPONSE_INVALID);
@@ -552,7 +593,7 @@ public class CorePgPaymentService {
         corePgPaymentPersistenceService.markPaidAndSaveEvent(
                 payment.getPaymentId(),
                 firstPgResponse,
-                selectedRecommendation.getStrategyType());
+                strategyType);
 
         List<CardDetailEntity> savedCardDetails = new ArrayList<>();
         try {
@@ -950,6 +991,19 @@ public class CorePgPaymentService {
                 .benefitId(appliedBenefit.getBenefitId())
                 .tierId(appliedBenefit.getTierId())
                 .benefitAmount(appliedBenefit.getBenefitAmount())
+                .build();
+    }
+
+    private PinAndPayRequest toDirectCardRequest(DirectPinAndPayRequest request) {
+        return PinAndPayRequest.builder()
+                .pin(request.getPin())
+                .paymentId(request.getPaymentId())
+                .totalAmount(request.getTotalAmount())
+                .cards(List.of(
+                        PinAndPayRequest.CardPortion.builder()
+                                .cardId(request.getCardId())
+                                .amount(request.getTotalAmount())
+                                .build()))
                 .build();
     }
 
