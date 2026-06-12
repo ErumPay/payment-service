@@ -51,7 +51,7 @@ public class DutchPaySessionDetailResponse {
                 .merchant_name(session.getMerchant_name())
                 .host_auth_payment_id(session.getHost_auth_payment_id())
                 .total_amount(session.getTotal_amount())
-                .remaining_amount(session.getTotal_amount() - assignedAmount)
+                .remaining_amount(Math.max(0L, session.getTotal_amount() - assignedAmount))
                 .split_method(session.getSplit_method().name())
                 .status(session.getStatus().name())
                 .created_at(session.getCreated_at())
@@ -103,7 +103,7 @@ public class DutchPaySessionDetailResponse {
                         && participant.getPayment() == null)) {
             return paymentStep(session);
         }
-        if (allPayableMembersPaid(session, participants)
+        if (allPayableMembersSettled(session, participants)
                 && hostAmount(session, participants) > 0
                 && hostStatus(session, participants) != ParticipantStatus.HOST_PAID) {
             return ProgressStep.FINAL_PAYMENT_REQUIRED.name();
@@ -161,18 +161,30 @@ public class DutchPaySessionDetailResponse {
                 .orElse(null);
     }
 
-    private static boolean allPayableMembersPaid(
+    private static boolean allPayableMembersSettled(
             DutchPaySessionEntity session,
             List<DutchPayParticipantEntity> participants) {
         if (participants == null) {
             return false;
         }
 
-        return participants.stream()
+        List<DutchPayParticipantEntity> members = participants.stream()
                 .filter(participant -> !isHost(session, participant))
-                .filter(participant -> participant.getStatus() != ParticipantStatus.REJECTED)
                 .filter(participant -> participant.getStatus() != ParticipantStatus.TIMEOUT)
-                .allMatch(participant -> participant.getStatus() == ParticipantStatus.PAID);
+                .filter(participant ->
+                        participant.getStatus() != ParticipantStatus.REJECTED ||
+                                isFailedPaymentParticipant(participant))
+                .toList();
+
+        return !members.isEmpty()
+                && members.stream().allMatch(participant ->
+                        participant.getStatus() == ParticipantStatus.PAID
+                                || isFailedPaymentParticipant(participant));
+    }
+
+    private static boolean isFailedPaymentParticipant(DutchPayParticipantEntity participant) {
+        return participant.getStatus() == ParticipantStatus.REJECTED
+                && (participant.getPayment() != null || participant.getAmount() != null);
     }
 
     private enum ProgressStep {
