@@ -16,6 +16,6 @@ public interface MerchantClient {
     @PostMapping(value = "/internal/v1/merchants/api-key/validate", consumes = "application/json")
     ApiKeyValidationResponse validateApiKey(@RequestBody ApiKeyValidationRequest request);
 
-    @GetMapping(value = "/api/v1/pg-admin/merchants/{merchantId}")
+    @GetMapping(value = "/internal/v1/merchants/{merchantId}")
     MerchantResponse merchantInfoRequest(@PathVariable("merchantId") Long merchantId);
 }

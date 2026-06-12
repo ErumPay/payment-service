@@ -15,7 +15,7 @@ public class DutchPayMyPaymentResponse {
     private Long user_id;
     private Long host_user_id;
     private Long merchant_id;
-    private String order_name;
+    private String merchant_name;
     private Long amount;
     private Long total_amount;
     private String split_method;
@@ -40,7 +40,7 @@ public class DutchPayMyPaymentResponse {
                 .user_id(participant.getUser_id())
                 .host_user_id(session.getHost_user_id())
                 .merchant_id(session.getMerchant_id())
-                .order_name(session.getOrder_name())
+                .merchant_name(session.getMerchant_name())
                 .amount(participant.getAmount())
                 .total_amount(session.getTotal_amount())
                 .split_method(session.getSplit_method().name())

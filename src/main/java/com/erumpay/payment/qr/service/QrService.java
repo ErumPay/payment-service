@@ -7,6 +7,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import feign.FeignException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import com.erumpay.payment.core.dao.CoreRepository;
 import com.erumpay.payment.core.domain.entity.CoreEntity;
+import com.erumpay.payment.core.domain.entity.CoreEntity.PaymentStatus;
 import com.erumpay.payment.core.domain.entity.EventEntity;
 import com.erumpay.payment.core.exception.CustomException;
 import com.erumpay.payment.core.exception.ErrorCode;
@@ -59,12 +61,23 @@ public class QrService {
                 String orderNo = generateUniqueOrderNo(now);
                 CoreEntity order = CoreEntity.toEntity(
                                 orderNo,
-                                request.getOrder_name(),
                                 request.getAmount(),
                                 request.getMerchant_id(),
                                 request.getChannel_type(),
                                 now);
-                MerchantResponse merchant = merchantClient.merchantInfoRequest(request.getMerchant_id());
+                log.info("Calling merchant-service for QR create. merchantId={}", request.getMerchant_id());
+                MerchantResponse merchant;
+                try {
+                        merchant = merchantClient.merchantInfoRequest(request.getMerchant_id());
+                } catch (FeignException e) {
+                        log.error("merchant-service call failed during QR create. merchantId={}, status={}",
+                                        request.getMerchant_id(),
+                                        e.status(),
+                                        e);
+                        throw e;
+                }
+                logMerchantInfoResponse("qr.create", request.getMerchant_id(), merchant);
+                validateMerchantInfo(merchant);
                 order.updateMerchantInfo(
                                 merchant.getMerchantName(),
                                 merchant.getBusinessNumber(),
@@ -152,6 +165,10 @@ public class QrService {
                 if (qr.is_used()) {
                         throw new CustomException(ErrorCode.QR_USED);
                 }
+                // [be] 조보름 260607 0338 | 이미 결제 처리된 QR 재스캔 시 프론트가 카드 선택 화면으로 진입하지 않도록 검증 단계에서 차단합니다.
+                if (isProcessedPayment(qr.getOrder().getPayment_status())) {
+                        throw new CustomException(ErrorCode.PAYMENT_ALREADY_PROCESSED);
+                }
                 if (now.isAfter(qr.getExpired_at())) {
                         throw new CustomException(ErrorCode.QR_EXPIRED);
                 }
@@ -159,16 +176,53 @@ public class QrService {
                 return ResponseEntity.ok(QrResponse.fromOrderEntity(qr.getOrder(), "VALID"));
         }
 
+        // [be] 조보름 260607 0338 | QR 사용 여부와 별개로 결제 주문 상태가 완료/취소/실패/만료된 경우 재결제 플로우를 막기 위한 상태 판별 함수입니다.
+        private boolean isProcessedPayment(PaymentStatus status) {
+                return status == PaymentStatus.PAID
+                                || status == PaymentStatus.AUTHORIZED
+                                || status == PaymentStatus.VOIDED
+                                || status == PaymentStatus.CANCELED
+                                || status == PaymentStatus.FAILED
+                                || status == PaymentStatus.EXPIRED;
+        }
+
         private void validateQrCreateRequest(QrRequest request) {
                 if (request == null
                                 || request.getMerchant_id() == null
                                 || request.getAmount() == null
                                 || request.getAmount() <= 0
-                                || request.getOrder_name() == null
-                                || request.getOrder_name().isBlank()
+
                                 || request.getChannel_type() == null
                                 || request.getChannel_type().isBlank()) {
                         throw new CustomException(ErrorCode.QR_REQUEST_INVALID);
                 }
+        }
+
+        private void validateMerchantInfo(MerchantResponse merchant) {
+                if (merchant == null
+                                || merchant.getMerchantName() == null
+                                || merchant.getMerchantName().isBlank()
+                                || merchant.getMccCode() == null
+                                || merchant.getMccCode().isBlank()) {
+                        log.warn("Merchant info validation failed. responseMerchantId={}, hasMerchantName={}, hasMccCode={}",
+                                        merchant == null ? null : merchant.getMerchantId(),
+                                        merchant != null && merchant.getMerchantName() != null
+                                                        && !merchant.getMerchantName().isBlank(),
+                                        merchant != null && merchant.getMccCode() != null
+                                                        && !merchant.getMccCode().isBlank());
+                        throw new CustomException(ErrorCode.MERCHANT_AUTH_UNAVAILABLE);
+                }
+        }
+
+        private void logMerchantInfoResponse(String flow, Long requestedMerchantId, MerchantResponse merchant) {
+                log.info(
+                                "Merchant info response. flow={}, requestedMerchantId={}, responseMerchantId={}, hasMerchantName={}, hasMccCode={}",
+                                flow,
+                                requestedMerchantId,
+                                merchant == null ? null : merchant.getMerchantId(),
+                                merchant != null && merchant.getMerchantName() != null
+                                                && !merchant.getMerchantName().isBlank(),
+                                merchant != null && merchant.getMccCode() != null
+                                                && !merchant.getMccCode().isBlank());
         }
 }

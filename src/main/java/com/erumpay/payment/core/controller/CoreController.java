@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.erumpay.payment.core.domain.dto.request.DutchMemberPrepareRequest;
+import com.erumpay.payment.core.domain.dto.request.DirectPinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.request.PinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.request.PrepareRequest;
 import com.erumpay.payment.core.domain.dto.request.RemoteMemberPrepareRequest;
@@ -128,6 +129,18 @@ public class CoreController {
         log.info("/payment/request controller");
 
         return coreService.requestPay(userId, idempotencyKey, request);
+    }
+
+    @PostMapping("/request-direct")
+    @Operation(summary = "비밀번호 확인 후 직접 선택 카드 결제 요청", description = "결제 PIN을 검증하고 사용자가 직접 선택한 카드 1장으로 실제 결제를 요청한다.")
+    public ResponseEntity<PinAndPayResponse> requestDirectPay(
+            @Parameter(description = "요청 사용자 ID", required = true) @RequestHeader("X-User-Id") Long userId,
+            @Parameter(description = "멱등성 키", required = true) @RequestHeader("Idempotency-Key") String idempotencyKey,
+            @Valid @RequestBody DirectPinAndPayRequest request) {
+
+        log.info("/payment/request-direct controller");
+
+        return coreService.requestDirectPay(userId, idempotencyKey, request);
     }
 
     // [be] 다윤 260527 결제 취소 요청

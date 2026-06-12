@@ -7,14 +7,22 @@ import java.util.Optional;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.erumpay.payment.core.domain.entity.CoreEntity;
 
+import jakarta.persistence.LockModeType;
+
 public interface CoreRepository extends JpaRepository<CoreEntity, Long> {
         @Query("select count(o) > 0 from CoreEntity o where o.order_no = :orderNo")
         boolean existsByOrderNo(@Param("orderNo") String orderNo);
+
+        // [be] 영은 260610 | 원격결제 대리자 취소 시 요청자 원본 주문을 함께 갱신하므로 source payment를 비관적 락으로 조회한다.
+        @Lock(LockModeType.PESSIMISTIC_WRITE)
+        @Query("select o from CoreEntity o where o.paymentId = :paymentId")
+        Optional<CoreEntity> findByIdForUpdate(@Param("paymentId") Long paymentId);
 
         boolean existsByIdempotencyKey(String idempotencyKey);
 
@@ -70,7 +78,7 @@ public interface CoreRepository extends JpaRepository<CoreEntity, Long> {
                         @Param("paymentStatus") CoreEntity.PaymentStatus paymentStatus);
 
         @Query("""
-                        select coalesce(o.merchant_name, o.order_name) as merchantName,
+                        select o.merchant_name as merchantName,
                                count(o) as paymentCount,
                                coalesce(sum(o.amount), 0) as paidAmount
                         from CoreEntity o
@@ -78,7 +86,7 @@ public interface CoreRepository extends JpaRepository<CoreEntity, Long> {
                           and o.payment_status = :paymentStatus
                           and o.paidAt >= :from
                           and o.paidAt < :to
-                        group by coalesce(o.merchant_name, o.order_name)
+                        group by o.merchant_name
                         order by paidAmount desc, paymentCount desc
                         """)
         List<MerchantUsageProjection> findMerchantUsages(

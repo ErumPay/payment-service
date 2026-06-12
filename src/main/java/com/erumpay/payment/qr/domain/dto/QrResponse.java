@@ -23,8 +23,8 @@ public class QrResponse {
     private String code;
     @Schema(description = "결제 금액", example = "12000")
     private Long amount;
-    @Schema(description = "주문명", example = "아메리카노 2잔")
-    private String order_name;
+    @Schema(description = "가맹점명", example = "스타벅스 강남점")
+    private String merchant_name;
     @Schema(description = "채널 타입", example = "ONLINE")
     private String channel_type;
 
@@ -33,8 +33,12 @@ public class QrResponse {
                 .code(code)
                 .paymentId(entity.getPaymentId())
                 .amount(entity.getAmount())
-                .order_name(entity.getOrder_name())
+                .merchant_name(resolveMerchantName(entity))
                 .channel_type(entity.getChannel_type().name())
                 .build();
+    }
+
+    private static String resolveMerchantName(CoreEntity entity) {
+        return entity.getMerchant_name();
     }
 }

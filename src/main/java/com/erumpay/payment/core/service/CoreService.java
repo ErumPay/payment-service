@@ -43,6 +43,7 @@ import com.erumpay.payment.core.client.recommend.dto.RecommendRequest;
 import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
 import com.erumpay.payment.core.dao.CardDetailRepository;
 import com.erumpay.payment.core.dao.CoreRepository;
+import com.erumpay.payment.core.domain.dto.request.DirectPinAndPayRequest;
 import com.erumpay.payment.core.domain.dto.request.DutchMemberPrepareRequest;
 import com.erumpay.payment.core.domain.dto.request.PaymentAllFetchRequest;
 import com.erumpay.payment.core.domain.dto.request.PinAndPayRequest;
@@ -301,6 +302,34 @@ public class CoreService {
         return ResponseEntity.ok(toPinAndPayResponse(payment));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public ResponseEntity<PinAndPayResponse> requestDirectPay(
+            Long userId,
+            String idempotencyKey,
+            DirectPinAndPayRequest request) {
+        log.info("/payment/request-direct Service");
+
+        if (request == null) {
+            throw new CustomException(ErrorCode.PAYMENT_REQUEST_BODY_INVALID);
+        }
+        if (userId == null) {
+            throw new CustomException(ErrorCode.PAYMENT_USER_REQUIRED);
+        }
+        String normalizedIdempotencyKey = coreValidationService.normalizeIdempotencyKey(idempotencyKey);
+        CoreEntity payment = findPaymentOrThrow(request.getPaymentId());
+
+        validateDirectPayRequestPreconditions(payment, userId, normalizedIdempotencyKey, request);
+
+        verifyPin(userId, request.getPin());
+
+        corePgPaymentService.requestDirectPgPayment(payment, request);
+
+        entityManager.refresh(payment);
+        publishPaymentCompletedIfPaid(payment);
+
+        return ResponseEntity.ok(toPinAndPayResponse(payment));
+    }
+
     private void publishPaymentCompletedIfPaid(CoreEntity payment) {
         if (payment.getPayment_status() != CoreEntity.PaymentStatus.PAID) {
             return;
@@ -309,7 +338,7 @@ public class CoreService {
         coreNotificationEventPublisher.publishPaymentCompleted(
                 payment.getUserId(),
                 payment.getPaymentId(),
-                payment.getOrder_name());
+                resolveMerchantName(payment));
         publishPaymentSettlementCompletedIfEligible(payment);
     }
 
@@ -389,11 +418,13 @@ public class CoreService {
                 canceledAt,
                 resolveCanceledEventPgTxnId(cards),
                 payment.getPgGroupId());
+        // [be] 영은 260610 | 대리결제자 결제 취소 성공 후 요청자 source payment도 같은 취소 상태로 동기화한다.
+        remotePayService.cancelSourcePaymentIfNeeded(payment, canceledAt);
         notifyCardPaymentCanceled(payment, cards, canceledAt);
         coreNotificationEventPublisher.publishPaymentCanceled(
                 payment.getUserId(),
                 payment.getPaymentId(),
-                payment.getOrder_name());
+                resolveMerchantName(payment));
         publishPaymentSettlementCanceledIfEligible(payment);
 
         return toCanceledResponse(payment.getPaymentId(), CoreEntity.PaymentStatus.CANCELED, canceledAt);
@@ -505,8 +536,10 @@ public class CoreService {
         validatePaymentOwner(payment, userId);
         validatePaymentHistoryStatus(payment);
         List<CardDetailEntity> cardDetails = cardDetailRepository.findAllByPaymentId(paymentId);
+        // [be] 영은 260610 | source payment와 payer payment 모두 같은 원격결제 요청 정보를 상세 응답에 포함한다.
+        RemotePayCreateResponse remoteRequest = remotePayService.getRequestByPaymentId(paymentId);
 
-        return toPaymentDetailResponse(payment, cardDetails);
+        return toPaymentDetailResponse(payment, cardDetails, userId, remoteRequest);
     }
 
     @Transactional(readOnly = true)
@@ -710,7 +743,7 @@ public class CoreService {
                         .host_user_id(userId)
                         .merchant_id(payment.getMerchant_id())
                         .total_amount(payment.getAmount())
-                        .order_name(payment.getOrder_name())
+                        .merchant_name(resolveMerchantName(payment))
                         .build());
 
         payment.hostDutchSessionPayment(dutchResponse.getSession_id(), CoreEntity.DutchRole.HOST);
@@ -729,7 +762,7 @@ public class CoreService {
                 userId,
                 RemotePayDraftCreateRequest.builder()
                         .source_payment_id(payment.getPaymentId())
-                        .description(payment.getOrder_name())
+                        .description(resolveMerchantName(payment))
                         .build());
 
         log.info("remote createDraftFromCore response : {}", remoteResponse);
@@ -865,6 +898,21 @@ public class CoreService {
         validateAmountMatches(payment.getAmount(), request.getTotalAmount());
         coreValidationService.validateCardAmounts(request);
         validateHostAuthOnlyCardSelection(payment, request);
+        validateRemotePaymentRequestIfNeeded(payment);
+    }
+
+    private void validateDirectPayRequestPreconditions(
+            CoreEntity payment,
+            Long userId,
+            String normalizedIdempotencyKey,
+            DirectPinAndPayRequest request) {
+        validatePaymentOwner(payment, userId);
+        validateIdempotencyKeyMatches(payment, normalizedIdempotencyKey);
+        coreValidationService.validateRequestStatus(payment.getPayment_status());
+        if (request.getPin() == null || request.getPin().isBlank()) {
+            throw new CustomException(ErrorCode.PAYMENT_PIN_REQUIRED);
+        }
+        validateAmountMatches(payment.getAmount(), request.getTotalAmount());
         validateRemotePaymentRequestIfNeeded(payment);
     }
 
@@ -1229,7 +1277,7 @@ public class CoreService {
                 .strategyType(payment.getStrategy_type() == null ? null : payment.getStrategy_type().name())
                 .status(payment.getPayment_status().name())
                 .amount(payment.getAmount())
-                .orderName(payment.getOrder_name())
+                .merchantName(resolveMerchantName(payment))
                 .paidAt(payment.getPaidAt())
                 .build();
     }
@@ -1265,31 +1313,47 @@ public class CoreService {
         return value == null ? 0L : value;
     }
 
-    private String resolveCardPaymentHistoryStatus(String cardStatus, String cancelStatus) {
-        if (CardStatus.CANCEL_REQUESTED.name().equals(cardStatus)
-                || "REQUESTED".equals(cancelStatus)
-                || "PG_PENDING".equals(cancelStatus)) {
-            return "결제취소요청";
-        }
-        if (CardStatus.CANCELED.name().equals(cardStatus)
-                || "CANCELLED".equals(cancelStatus)) {
-            return "결제취소";
-        }
-        if (CardStatus.PAID.name().equals(cardStatus)) {
-            return "결제완료";
-        }
-        throw new CustomException(ErrorCode.PAYMENT_STATE_INVALID);
+    private String resolveMerchantName(CoreEntity payment) {
+        return payment.getMerchant_name();
     }
 
-    private PaymentDetailResponse toPaymentDetailResponse(CoreEntity payment, List<CardDetailEntity> cardDetails) {
+    private String resolveCardPaymentHistoryStatus(String cardStatus, String cancelStatus) {
+    if (CardStatus.CANCEL_REQUESTED.name().equals(cardStatus)
+            || "REQUESTED".equals(cancelStatus)
+            || "PG_PENDING".equals(cancelStatus)) {
+        return "결제취소요청";
+    }
+    if (CardStatus.CANCELED.name().equals(cardStatus)
+            || "CANCELLED".equals(cancelStatus)) {
+        return "결제취소";
+    }
+    if (CardStatus.PAID.name().equals(cardStatus)) {
+        return "결제완료";
+    }
+    throw new CustomException(ErrorCode.PAYMENT_STATE_INVALID);
+}
+
+    private PaymentDetailResponse toPaymentDetailResponse(
+            CoreEntity payment,
+            List<CardDetailEntity> cardDetails,
+            Long userId,
+            RemotePayCreateResponse remoteRequest) {
         return PaymentDetailResponse.builder()
                 .userId(payment.getUserId())
                 .paymentId(payment.getPaymentId())
                 .paymentType(payment.getPayment_type().name())
                 .strategyType(payment.getStrategy_type() == null ? null : payment.getStrategy_type().name())
                 .status(payment.getPayment_status().name())
+                .remoteRequestId(remoteRequest == null ? null : remoteRequest.getRequest_id())
+                .requesterUserId(remoteRequest == null ? null : remoteRequest.getRequester_user_id())
+                .targetUserId(remoteRequest == null ? null : remoteRequest.getTarget_user_id())
+                .remoteRole(resolveRemoteRole(userId, remoteRequest))
                 .amount(payment.getAmount())
-                .orderName(payment.getOrder_name())
+                .merchantName(resolveMerchantName(payment))
+                .businessNumber(payment.getBusiness_number())
+                .ownerName(payment.getOwner_name())
+                .contactPhone(payment.getContact_phone())
+                .businessAddress(payment.getBusiness_address())
                 .orderNo(payment.getOrder_no())
                 .paidAt(payment.getPaidAt() == null ? payment.getUpdatedAt() : payment.getPaidAt())
                 .canceledAt(payment.getCanceledAt())
@@ -1297,6 +1361,20 @@ public class CoreService {
                         .map(this::toPaymentCardItem)
                         .toList())
                 .build();
+    }
+
+    private String resolveRemoteRole(Long userId, RemotePayCreateResponse remoteRequest) {
+        // [be] 영은 260610 | 프론트가 auth-service로 이름을 조회할 수 있도록 상세 응답에는 역할 구분만 내려준다.
+        if (userId == null || remoteRequest == null) {
+            return null;
+        }
+        if (userId.equals(remoteRequest.getRequester_user_id())) {
+            return "REQUESTER";
+        }
+        if (userId.equals(remoteRequest.getTarget_user_id())) {
+            return "PAYER";
+        }
+        return null;
     }
 
     private PaymentDetailResponse.CardItem toPaymentCardItem(CardDetailEntity cardDetail) {
@@ -1367,7 +1445,7 @@ public class CoreService {
                 .merchant_id(sourcePayment.getMerchant_id())
                 .idempotencyKey(normalizedIdempotencyKey)
                 .order_no(qrService.generateUniqueOrderNo(now))
-                .order_name(sourcePayment.getOrder_name())
+                .merchant_name(resolveMerchantName(sourcePayment))
                 .amount(request.getAmount())
                 .payment_status(CoreEntity.PaymentStatus.CREATED)
                 .payment_type(CoreEntity.PaymentType.DUTCH)
@@ -1440,7 +1518,7 @@ public class CoreService {
                 .merchant_id(sourcePayment.getMerchant_id())
                 .idempotencyKey(normalizedIdempotencyKey)
                 .order_no(qrService.generateUniqueOrderNo(now))
-                .order_name(sourcePayment.getOrder_name())
+                .merchant_name(resolveMerchantName(sourcePayment))
                 .amount(request.getAmount())
                 .payment_status(CoreEntity.PaymentStatus.CREATED)
                 .payment_type(CoreEntity.PaymentType.REMOTE)

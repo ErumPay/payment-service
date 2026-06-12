@@ -152,7 +152,9 @@ public class CorePgPaymentPersistenceService {
                 .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
 
         LocalDateTime now = LocalDateTime.now();
-        payment.updateStrategyType(strategyType, now);
+        if (strategyType != null && !strategyType.isBlank()) {
+            payment.updateStrategyType(strategyType, now);
+        }
         if (pgResponse != null && pgResponse.getPgGroupId() != null) {
             payment.updatePgGroupId(pgResponse.getPgGroupId(), now);
         }
@@ -401,7 +403,9 @@ public class CorePgPaymentPersistenceService {
                 .orElseThrow(() -> new CustomException(ErrorCode.PAY_NOT_FOUND));
 
         LocalDateTime now = LocalDateTime.now();
-        payment.updateStrategyType(strategyType, now);
+        if (strategyType != null && !strategyType.isBlank()) {
+            payment.updateStrategyType(strategyType, now);
+        }
         if (pgResponse != null && pgResponse.getPgGroupId() != null) {
             payment.updatePgGroupId(pgResponse.getPgGroupId(), now);
         }

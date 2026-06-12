@@ -24,7 +24,7 @@ public class MerchantPaymentRequest {
     private Long amount;
 
     @NotBlank
-    private String orderName;
+    private String merchantName;
 
     @NotNull
     private CoreEntity.ChannelType channel;

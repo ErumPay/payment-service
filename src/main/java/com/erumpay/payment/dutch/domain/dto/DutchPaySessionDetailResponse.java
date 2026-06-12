@@ -1,5 +1,7 @@
 package com.erumpay.payment.dutch.domain.dto;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 
@@ -15,17 +17,21 @@ import lombok.Getter;
 @Builder
 @Getter
 public class DutchPaySessionDetailResponse {
+    private static final Duration SESSION_EXPIRES_AFTER = Duration.ofMinutes(30);
 
     private Long session_id;
     private String dutch_order_no;
     private Long host_user_id;
     private Long merchant_id;
-    private String order_name;
+    private String merchant_name;
     private Long host_auth_payment_id;
     private Long total_amount;
     private Long remaining_amount;
     private String split_method;
     private String status;
+    // [be] 영은 260610 | 프론트가 더치페이 홈에서 만료 시간을 직접 보조 판단할 수 있도록 생성/만료 시각을 내려준다.
+    private LocalDateTime created_at;
+    private LocalDateTime expires_at;
     private String session_progress_step;
     private List<DutchPayParticipantResponse> participants;
 
@@ -42,12 +48,14 @@ public class DutchPaySessionDetailResponse {
                 .dutch_order_no(session.getDutch_order_no())
                 .host_user_id(session.getHost_user_id())
                 .merchant_id(session.getMerchant_id())
-                .order_name(session.getOrder_name())
+                .merchant_name(session.getMerchant_name())
                 .host_auth_payment_id(session.getHost_auth_payment_id())
                 .total_amount(session.getTotal_amount())
                 .remaining_amount(session.getTotal_amount() - assignedAmount)
                 .split_method(session.getSplit_method().name())
                 .status(session.getStatus().name())
+                .created_at(session.getCreated_at())
+                .expires_at(session.getCreated_at() == null ? null : session.getCreated_at().plus(SESSION_EXPIRES_AFTER))
                 .participants(participants.stream()
                         .map(participant -> DutchPayParticipantResponse.fromEntity(participant, session.getHost_user_id()))
                         .toList())
@@ -66,6 +74,9 @@ public class DutchPaySessionDetailResponse {
         }
         if (session.getStatus() == DutchPayStatus.COMPLETED) {
             return ProgressStep.COMPLETED.name();
+        }
+        if (session.getStatus() == DutchPayStatus.CANCELED) {
+            return ProgressStep.CANCELED.name();
         }
         if (session.getStatus() == DutchPayStatus.TIMEOUT_HANDLED) {
             return hostAmount(session, participants) > 0

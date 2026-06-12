@@ -33,7 +33,6 @@ public class CoreEntity {
 
     // qr/request 때 저장
     private String order_no;
-    private String order_name;
     private Long amount;
     private Long merchant_id;
 
@@ -246,14 +245,12 @@ public class CoreEntity {
     // [be] 다윤 260526 QR 생성시 new entity 생성
     public static CoreEntity toEntity(
             String orderNo,
-            String orderName,
             Long amount,
             Long merchantId,
             String channelType,
             LocalDateTime createdAt) {
         return CoreEntity.builder()
                 .order_no(orderNo)
-                .order_name(orderName)
                 .amount(amount)
                 .merchant_id(merchantId)
                 .channel_type(ChannelType.valueOf(channelType.trim().toUpperCase(Locale.ROOT)))
@@ -265,7 +262,7 @@ public class CoreEntity {
 
     public static CoreEntity toDutchHostAuthEntity(
             String orderNo,
-            String orderName,
+            String merchantName,
             Long amount,
             Long userId,
             Long merchantId,
@@ -274,7 +271,7 @@ public class CoreEntity {
         // [be] 영은 260519 1440 | 대표자 가승인은 실제 매입 전 AUTHORIZED 상태의 더치페이 주문으로 기록
         return CoreEntity.builder()
                 .order_no(orderNo)
-                .order_name(orderName)
+                .merchant_name(merchantName)
                 .amount(amount)
                 .userId(userId)
                 .merchant_id(merchantId)
@@ -290,7 +287,7 @@ public class CoreEntity {
 
     public static CoreEntity toRemotePaymentEntity(
             String orderNo,
-            String orderName,
+            String merchantName,
             Long amount,
             Long userId,
             Long remoteRequestId,
@@ -298,7 +295,7 @@ public class CoreEntity {
             LocalDateTime createdAt) {
         return CoreEntity.builder()
                 .order_no(orderNo)
-                .order_name(orderName)
+                .merchant_name(merchantName)
                 .amount(amount)
                 .userId(userId)
                 .idempotencyKey(idempotencyKey)

@@ -2,6 +2,7 @@ package com.erumpay.payment.dutch.domain.entity;
 
 import java.time.LocalDateTime;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -29,7 +30,8 @@ public class DutchPaySessionEntity {
     private String dutch_order_no;
     private Long host_user_id;
     private Long merchant_id;
-    private String order_name;
+    @Column(name = "order_name")
+    private String merchant_name;
     private Long host_auth_payment_id;
 
     private Long total_amount;
@@ -54,7 +56,7 @@ public class DutchPaySessionEntity {
             Long hostAuthPaymentId,
             Long hostUserId,
             Long merchantId,
-            String orderName,
+            String merchantName,
             Long totalAmount,
             LocalDateTime now) {
         return DutchPaySessionEntity.builder()
@@ -62,7 +64,7 @@ public class DutchPaySessionEntity {
                 .host_auth_payment_id(hostAuthPaymentId)
                 .host_user_id(hostUserId)
                 .merchant_id(merchantId)
-                .order_name(orderName)
+                .merchant_name(merchantName)
                 .total_amount(totalAmount)
                 .split_method(SplitMethod.CUSTOM)
                 .status(DutchPayStatus.CREATED)
@@ -171,6 +173,19 @@ public class DutchPaySessionEntity {
         this.updated_at = now;
     }
 
+    public void cancel(LocalDateTime now) {
+        // [be] 영은 260610 | 결제 주문이 생성되기 전 대표자가 그룹을 파기할 때 세션만 취소 상태로 전환한다.
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        if (this.status != DutchPayStatus.CREATED && this.status != DutchPayStatus.IN_PROGRESS) {
+            throw new IllegalStateException("Dutch pay session cannot be canceled from current status");
+        }
+
+        this.status = DutchPayStatus.CANCELED;
+        this.updated_at = now;
+    }
+
     public enum SplitMethod {
         EQUAL,
         CUSTOM
@@ -181,6 +196,7 @@ public class DutchPaySessionEntity {
         IN_PROGRESS,
         COMPLETED,
         TIMEOUT_HANDLED,
+        CANCELED,
         FAILED
     }
 }
