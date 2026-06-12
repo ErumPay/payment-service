@@ -190,6 +190,16 @@ public class DutchPayController {
         return ResponseEntity.ok(dutchPayService.confirmParticipants(userId, session_id, request));
     }
 
+    // [be] 영은 260612 | 대표자가 참여자에게 결제 요청을 보내 결제 진행 단계로 전환하는 API
+    @PostMapping("/api/v1/dutch-pay/sessions/{session_id}/payment-request")
+    public ResponseEntity<DutchPaySessionDetailResponse> requestPayment(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable("session_id") Long session_id) {
+        log.info("/api/v1/dutch-pay/sessions/{}/payment-request Controller", session_id);
+
+        return ResponseEntity.ok(dutchPayService.requestPayment(userId, session_id));
+    }
+
     // [be] 영은 260523 1120 | 대표자가 EQUAL/CUSTOM 배분 방식을 변경하는 API
     @PatchMapping("/api/v1/dutch-pay/sessions/{session_id}/split-method")
     public ResponseEntity<DutchPaySessionDetailResponse> updateSplitMethod(
