@@ -33,7 +33,7 @@ public class PaymentListResonse {
         private String status;
 
         private Long amount;
-        private String orderName;
+        private String merchantName;
         private LocalDateTime paidAt;
     }
 

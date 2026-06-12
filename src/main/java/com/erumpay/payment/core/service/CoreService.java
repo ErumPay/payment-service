@@ -309,7 +309,7 @@ public class CoreService {
         coreNotificationEventPublisher.publishPaymentCompleted(
                 payment.getUserId(),
                 payment.getPaymentId(),
-                payment.getOrder_name());
+                resolveMerchantName(payment));
         publishPaymentSettlementCompletedIfEligible(payment);
     }
 
@@ -395,7 +395,7 @@ public class CoreService {
         coreNotificationEventPublisher.publishPaymentCanceled(
                 payment.getUserId(),
                 payment.getPaymentId(),
-                payment.getOrder_name());
+                resolveMerchantName(payment));
         publishPaymentSettlementCanceledIfEligible(payment);
 
         return toCanceledResponse(payment.getPaymentId(), CoreEntity.PaymentStatus.CANCELED, canceledAt);
@@ -714,7 +714,7 @@ public class CoreService {
                         .host_user_id(userId)
                         .merchant_id(payment.getMerchant_id())
                         .total_amount(payment.getAmount())
-                        .order_name(payment.getOrder_name())
+                        .merchant_name(resolveMerchantName(payment))
                         .build());
 
         payment.hostDutchSessionPayment(dutchResponse.getSession_id(), CoreEntity.DutchRole.HOST);
@@ -733,7 +733,7 @@ public class CoreService {
                 userId,
                 RemotePayDraftCreateRequest.builder()
                         .source_payment_id(payment.getPaymentId())
-                        .description(payment.getOrder_name())
+                        .description(resolveMerchantName(payment))
                         .build());
 
         log.info("remote createDraftFromCore response : {}", remoteResponse);
@@ -1233,7 +1233,7 @@ public class CoreService {
                 .strategyType(payment.getStrategy_type() == null ? null : payment.getStrategy_type().name())
                 .status(payment.getPayment_status().name())
                 .amount(payment.getAmount())
-                .orderName(payment.getOrder_name())
+                .merchantName(resolveMerchantName(payment))
                 .paidAt(payment.getPaidAt())
                 .build();
     }
@@ -1269,6 +1269,10 @@ public class CoreService {
         return value == null ? 0L : value;
     }
 
+    private String resolveMerchantName(CoreEntity payment) {
+        return payment.getMerchant_name();
+    }
+
     private String resolveCardPaymentHistoryStatus(String cardStatus, String cancelStatus) {
     if (CardStatus.CANCEL_REQUESTED.name().equals(cardStatus)
             || "REQUESTED".equals(cancelStatus)
@@ -1301,7 +1305,11 @@ public class CoreService {
                 .targetUserId(remoteRequest == null ? null : remoteRequest.getTarget_user_id())
                 .remoteRole(resolveRemoteRole(userId, remoteRequest))
                 .amount(payment.getAmount())
-                .orderName(payment.getOrder_name())
+                .merchantName(resolveMerchantName(payment))
+                .businessNumber(payment.getBusiness_number())
+                .ownerName(payment.getOwner_name())
+                .contactPhone(payment.getContact_phone())
+                .businessAddress(payment.getBusiness_address())
                 .orderNo(payment.getOrder_no())
                 .paidAt(payment.getPaidAt() == null ? payment.getUpdatedAt() : payment.getPaidAt())
                 .canceledAt(payment.getCanceledAt())
@@ -1393,7 +1401,7 @@ public class CoreService {
                 .merchant_id(sourcePayment.getMerchant_id())
                 .idempotencyKey(normalizedIdempotencyKey)
                 .order_no(qrService.generateUniqueOrderNo(now))
-                .order_name(sourcePayment.getOrder_name())
+                .merchant_name(resolveMerchantName(sourcePayment))
                 .amount(request.getAmount())
                 .payment_status(CoreEntity.PaymentStatus.CREATED)
                 .payment_type(CoreEntity.PaymentType.DUTCH)
@@ -1466,7 +1474,7 @@ public class CoreService {
                 .merchant_id(sourcePayment.getMerchant_id())
                 .idempotencyKey(normalizedIdempotencyKey)
                 .order_no(qrService.generateUniqueOrderNo(now))
-                .order_name(sourcePayment.getOrder_name())
+                .merchant_name(resolveMerchantName(sourcePayment))
                 .amount(request.getAmount())
                 .payment_status(CoreEntity.PaymentStatus.CREATED)
                 .payment_type(CoreEntity.PaymentType.REMOTE)

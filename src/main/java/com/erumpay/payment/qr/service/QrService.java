@@ -7,6 +7,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import feign.FeignException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -60,12 +61,22 @@ public class QrService {
                 String orderNo = generateUniqueOrderNo(now);
                 CoreEntity order = CoreEntity.toEntity(
                                 orderNo,
-                                request.getOrder_name(),
                                 request.getAmount(),
                                 request.getMerchant_id(),
                                 request.getChannel_type(),
                                 now);
-                MerchantResponse merchant = merchantClient.merchantInfoRequest(request.getMerchant_id());
+                log.info("Calling merchant-service for QR create. merchantId={}", request.getMerchant_id());
+                MerchantResponse merchant;
+                try {
+                        merchant = merchantClient.merchantInfoRequest(request.getMerchant_id());
+                } catch (FeignException e) {
+                        log.error("merchant-service call failed during QR create. merchantId={}, status={}",
+                                        request.getMerchant_id(),
+                                        e.status(),
+                                        e);
+                        throw e;
+                }
+                logMerchantInfoResponse("qr.create", request.getMerchant_id(), merchant);
                 validateMerchantInfo(merchant);
                 order.updateMerchantInfo(
                                 merchant.getMerchantName(),
@@ -180,8 +191,7 @@ public class QrService {
                                 || request.getMerchant_id() == null
                                 || request.getAmount() == null
                                 || request.getAmount() <= 0
-                                || request.getOrder_name() == null
-                                || request.getOrder_name().isBlank()
+
                                 || request.getChannel_type() == null
                                 || request.getChannel_type().isBlank()) {
                         throw new CustomException(ErrorCode.QR_REQUEST_INVALID);
@@ -194,7 +204,25 @@ public class QrService {
                                 || merchant.getMerchantName().isBlank()
                                 || merchant.getMccCode() == null
                                 || merchant.getMccCode().isBlank()) {
+                        log.warn("Merchant info validation failed. responseMerchantId={}, hasMerchantName={}, hasMccCode={}",
+                                        merchant == null ? null : merchant.getMerchantId(),
+                                        merchant != null && merchant.getMerchantName() != null
+                                                        && !merchant.getMerchantName().isBlank(),
+                                        merchant != null && merchant.getMccCode() != null
+                                                        && !merchant.getMccCode().isBlank());
                         throw new CustomException(ErrorCode.MERCHANT_AUTH_UNAVAILABLE);
                 }
+        }
+
+        private void logMerchantInfoResponse(String flow, Long requestedMerchantId, MerchantResponse merchant) {
+                log.info(
+                                "Merchant info response. flow={}, requestedMerchantId={}, responseMerchantId={}, hasMerchantName={}, hasMccCode={}",
+                                flow,
+                                requestedMerchantId,
+                                merchant == null ? null : merchant.getMerchantId(),
+                                merchant != null && merchant.getMerchantName() != null
+                                                && !merchant.getMerchantName().isBlank(),
+                                merchant != null && merchant.getMccCode() != null
+                                                && !merchant.getMccCode().isBlank());
         }
 }

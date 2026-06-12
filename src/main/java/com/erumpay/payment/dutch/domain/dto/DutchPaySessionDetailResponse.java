@@ -23,7 +23,7 @@ public class DutchPaySessionDetailResponse {
     private String dutch_order_no;
     private Long host_user_id;
     private Long merchant_id;
-    private String order_name;
+    private String merchant_name;
     private Long host_auth_payment_id;
     private Long total_amount;
     private Long remaining_amount;
@@ -48,7 +48,7 @@ public class DutchPaySessionDetailResponse {
                 .dutch_order_no(session.getDutch_order_no())
                 .host_user_id(session.getHost_user_id())
                 .merchant_id(session.getMerchant_id())
-                .order_name(session.getOrder_name())
+                .merchant_name(session.getMerchant_name())
                 .host_auth_payment_id(session.getHost_auth_payment_id())
                 .total_amount(session.getTotal_amount())
                 .remaining_amount(session.getTotal_amount() - assignedAmount)

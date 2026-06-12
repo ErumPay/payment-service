@@ -14,7 +14,7 @@ public class MerchantPaymentResponse {
 
     private Long paymentId;
     private String orderNo;
-    private String orderName;
+    private String merchantName;
     private Long amount;
     private String channel;
     private String status;
@@ -27,7 +27,7 @@ public class MerchantPaymentResponse {
         return MerchantPaymentResponse.builder()
                 .paymentId(payment.getPaymentId())
                 .orderNo(payment.getOrder_no())
-                .orderName(payment.getOrder_name())
+                .merchantName(resolveMerchantName(payment))
                 .amount(payment.getAmount())
                 .channel(payment.getChannel_type() == null ? null : payment.getChannel_type().name())
                 .status(payment.getPayment_status() == null ? null : payment.getPayment_status().name())
@@ -35,5 +35,9 @@ public class MerchantPaymentResponse {
                 .qrToken(qrToken)
                 .paidAt(payment.getPaidAt())
                 .build();
+    }
+
+    private static String resolveMerchantName(CoreEntity payment) {
+        return payment.getMerchant_name();
     }
 }

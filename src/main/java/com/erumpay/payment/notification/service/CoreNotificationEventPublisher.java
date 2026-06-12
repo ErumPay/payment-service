@@ -38,24 +38,24 @@ public class CoreNotificationEventPublisher {
 
     // [be] 다윤 260607 03:00 | 결제 완료 시 호출
     public void publishPaymentCompleted(
-            Long userId, Long paymentId, String orderName) {
+            Long userId, Long paymentId, String merchantName) {
         publishPaymentEvent(
                 PaymentEventType.PAYMENT_COMPLETED,
                 "결제 완료",
                 userId,
                 paymentId,
-                buildPaymentCompletedContent(orderName));
+                buildPaymentCompletedContent(merchantName));
     }
 
     // [be] 다윤 260607 03:00 | 결제 취소 시 호출
     public void publishPaymentCanceled(
-            Long userId, Long paymentId, String orderName) {
+            Long userId, Long paymentId, String merchantName) {
         publishPaymentEvent(
                 PaymentEventType.PAYMENT_CANCELED,
                 "결제 취소",
                 userId,
                 paymentId,
-                buildPaymentCanceledContent(orderName));
+                buildPaymentCanceledContent(merchantName));
     }
 
     // [be] 다윤 260607 03:00 | 트랜잭션 이후 발행 제어
@@ -210,18 +210,18 @@ public class CoreNotificationEventPublisher {
         publish(event);
     }
 
-    private String buildPaymentCompletedContent(String orderName) {
-        if (orderName == null || orderName.isBlank()) {
+    private String buildPaymentCompletedContent(String merchantName) {
+        if (merchantName == null || merchantName.isBlank()) {
             return "결제가 완료되었습니다.";
         }
-        return String.format("%s 결제가 완료되었습니다.", orderName);
+        return String.format("%s 결제가 완료되었습니다.", merchantName);
     }
 
-    private String buildPaymentCanceledContent(String orderName) {
-        if (orderName == null || orderName.isBlank()) {
+    private String buildPaymentCanceledContent(String merchantName) {
+        if (merchantName == null || merchantName.isBlank()) {
             return "결제가 취소되었습니다.";
         }
-        return String.format("%s 결제가 취소되었습니다.", orderName);
+        return String.format("%s 결제가 취소되었습니다.", merchantName);
     }
 
     // [be] 다윤 260607 03:00 | eventId 포맷
