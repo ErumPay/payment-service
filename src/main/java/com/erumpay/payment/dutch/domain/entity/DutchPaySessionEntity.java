@@ -45,6 +45,7 @@ public class DutchPaySessionEntity {
     private LocalDateTime timeout_at;
     private LocalDateTime warning_1_sent_at;
     private LocalDateTime warning_2_sent_at;
+    private LocalDateTime payment_requested_at;
     private LocalDateTime created_at;
     private LocalDateTime updated_at;
     private LocalDateTime completed_at;
@@ -105,6 +106,19 @@ public class DutchPaySessionEntity {
 
         this.split_method = splitMethod;
         this.updated_at = now;
+    }
+
+    // [be] 영은 260612 | 대표자가 참여자에게 결제 요청하기를 누른 시점을 기록한다. 멱등 처리해 중복 호출에도 최초 시각을 유지한다.
+    public void requestPayment(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now must not be null");
+        }
+        requireInProgress();
+
+        if (this.payment_requested_at == null) {
+            this.payment_requested_at = now;
+            this.updated_at = now;
+        }
     }
 
     // [be] 영은 260601 | 대표자 최종 결제까지 끝난 세션을 완료 상태로 전환한다.

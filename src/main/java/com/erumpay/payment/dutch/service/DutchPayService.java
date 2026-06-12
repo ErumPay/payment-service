@@ -650,6 +650,17 @@ public class DutchPayService {
         return publishAndReturn(sessionId, "PARTICIPANTS_CONFIRMED");
     }
 
+    // [be] 영은 260612 | 대표자가 참여자에게 결제 요청하기를 누르면 세션에 요청 시점을 기록해 다른 기기 화면에 결제 버튼을 노출시킨다
+    @Transactional
+    public DutchPaySessionDetailResponse requestPayment(Long hostUserId, Long sessionId) {
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureHostInProgress(session, hostUserId);
+
+        session.requestPayment(LocalDateTime.now());
+
+        return publishAndReturn(sessionId, "PAYMENT_REQUESTED");
+    }
+
     // [be] 영은 260523 1120 | EQUAL은 즉시 균등 배분하고 CUSTOM은 대표자에게 전체 금액을 둔다
     @Transactional
     public DutchPaySessionDetailResponse updateSplitMethod(
