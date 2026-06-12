@@ -23,10 +23,6 @@ public class QrRequest {
     private Long amount;
 
     @NotBlank
-    @Schema(description = "주문명", example = "아메리카노 2잔")
-    private String order_name;
-
-    @NotBlank
     @Schema(description = "채널 타입", example = "ONLINE/OFFLINE")
     private String channel_type;
 }

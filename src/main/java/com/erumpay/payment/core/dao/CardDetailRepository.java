@@ -45,7 +45,7 @@ public interface CardDetailRepository extends JpaRepository<CardDetailEntity, Lo
     boolean existsByPaymentIdAndPgTxnId(@Param("paymentId") Long paymentId, @Param("pgTxnId") Long pgTxnId);
 
     @Query(value = """
-            select coalesce(o.merchant_name, o.order_name) as merchantName,
+            select o.merchant_name as merchantName,
                    c.paid_at as paidAt,
                    c.paid_amount as amount,
                    c.card_status as cardStatus,

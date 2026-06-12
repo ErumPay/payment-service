@@ -106,7 +106,7 @@ public class PaymentNotificationEventPublisher {
                 "대리결제자의 결제가 완료되었습니다.");
     }
 
-    public void publishDutchInvited(Long sessionId, Long userId, String orderName) {
+    public void publishDutchInvited(Long sessionId, Long userId, String merchantName) {
         publishDutch(
                 paymentTopic,
                 sessionId,
@@ -114,19 +114,19 @@ public class PaymentNotificationEventPublisher {
                 null,
                 "DUTCHPAY_INVITED",
                 "더치페이 초대가 도착했습니다.",
-                orderName == null ? "더치페이 초대가 도착했습니다." : orderName + " 더치페이 초대가 도착했습니다.");
+                merchantName == null ? "더치페이 초대가 도착했습니다." : merchantName + " 더치페이 초대가 도착했습니다.");
     }
 
-    public void publishDutchInviteRequested(Long sessionId, Long userId, String orderName, String inviteUrl) {
+    public void publishDutchInviteRequested(Long sessionId, Long userId, String merchantName, String inviteUrl) {
         // [be] 영은 260610 | 알림 전용 더치 초대는 기존 notification-service 타입을 재사용하고 sessionId를 라우팅 값으로 전달한다.
         if (sessionId == null || userId == null) {
             return;
         }
 
         String title = "더치페이 초대가 도착했습니다.";
-        String content = orderName == null
+        String content = merchantName == null
                 ? "더치페이 초대가 도착했습니다."
-                : orderName + " 더치페이 초대가 도착했습니다.";
+                : merchantName + " 더치페이 초대가 도착했습니다.";
         String eventId = "dutch:%s:%d:%d:%d".formatted(
                 "DUTCHPAY_INVITED",
                 sessionId,
@@ -144,7 +144,7 @@ public class PaymentNotificationEventPublisher {
                 inviteUrl == null ? "dutch:%d".formatted(sessionId) : inviteUrl);
     }
 
-    public void publishDutchConfirmed(Long sessionId, Long userId, String orderName) {
+    public void publishDutchConfirmed(Long sessionId, Long userId, String merchantName) {
         publishDutch(
                 paymentTopic,
                 sessionId,
@@ -152,7 +152,7 @@ public class PaymentNotificationEventPublisher {
                 null,
                 "DUTCHPAY_CONFIRMED",
                 "더치페이 인원이 확정되었습니다.",
-                orderName == null ? "더치페이 결제 요청을 확인해주세요." : orderName + " 결제 요청을 확인해주세요.");
+                merchantName == null ? "더치페이 결제 요청을 확인해주세요." : merchantName + " 결제 요청을 확인해주세요.");
     }
 
     public void publishDutchTimeoutWarning1(Long sessionId, Long userId, Long paymentId) {

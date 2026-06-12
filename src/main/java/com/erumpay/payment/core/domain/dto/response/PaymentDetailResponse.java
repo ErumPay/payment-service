@@ -29,7 +29,11 @@ public class PaymentDetailResponse {
     private String remoteRole;
 
     private Long amount;
-    private String orderName;
+    private String merchantName;
+    private String businessNumber;
+    private String ownerName;
+    private String contactPhone;
+    private String businessAddress;
     private String orderNo;
     private LocalDateTime paidAt;
     private LocalDateTime canceledAt;

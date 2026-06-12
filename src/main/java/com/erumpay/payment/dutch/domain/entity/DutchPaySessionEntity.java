@@ -2,6 +2,7 @@ package com.erumpay.payment.dutch.domain.entity;
 
 import java.time.LocalDateTime;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -29,7 +30,8 @@ public class DutchPaySessionEntity {
     private String dutch_order_no;
     private Long host_user_id;
     private Long merchant_id;
-    private String order_name;
+    @Column(name = "order_name")
+    private String merchant_name;
     private Long host_auth_payment_id;
 
     private Long total_amount;
@@ -53,7 +55,7 @@ public class DutchPaySessionEntity {
             Long hostAuthPaymentId,
             Long hostUserId,
             Long merchantId,
-            String orderName,
+            String merchantName,
             Long totalAmount,
             LocalDateTime now) {
         return DutchPaySessionEntity.builder()
@@ -61,7 +63,7 @@ public class DutchPaySessionEntity {
                 .host_auth_payment_id(hostAuthPaymentId)
                 .host_user_id(hostUserId)
                 .merchant_id(merchantId)
-                .order_name(orderName)
+                .merchant_name(merchantName)
                 .total_amount(totalAmount)
                 .split_method(SplitMethod.CUSTOM)
                 .status(DutchPayStatus.CREATED)

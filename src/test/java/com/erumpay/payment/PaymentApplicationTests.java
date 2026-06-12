@@ -16,7 +16,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 	"auth.base-url=http://localhost:8081",
 	"pg.base-url=http://localhost:8093",
 	"recommend.base-url=http://localhost:8084",
-	"card.base-url=http://localhost:8082"
+	"card.base-url=http://localhost:8082",
+	"merchant.base-url=http://localhost:8085"
 })
 class PaymentApplicationTests {
 

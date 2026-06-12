@@ -78,7 +78,7 @@ public interface CoreRepository extends JpaRepository<CoreEntity, Long> {
                         @Param("paymentStatus") CoreEntity.PaymentStatus paymentStatus);
 
         @Query("""
-                        select coalesce(o.merchant_name, o.order_name) as merchantName,
+                        select o.merchant_name as merchantName,
                                count(o) as paymentCount,
                                coalesce(sum(o.amount), 0) as paidAmount
                         from CoreEntity o
@@ -86,7 +86,7 @@ public interface CoreRepository extends JpaRepository<CoreEntity, Long> {
                           and o.payment_status = :paymentStatus
                           and o.paidAt >= :from
                           and o.paidAt < :to
-                        group by coalesce(o.merchant_name, o.order_name)
+                        group by o.merchant_name
                         order by paidAmount desc, paymentCount desc
                         """)
         List<MerchantUsageProjection> findMerchantUsages(

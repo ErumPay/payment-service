@@ -92,7 +92,7 @@ public class DutchPayService {
                 request.getHost_payment_id(),
                 request.getHost_user_id(),
                 request.getMerchant_id(),
-                request.getOrder_name(),
+                request.getMerchant_name(),
                 request.getTotal_amount(),
                 now);
         DutchPaySessionEntity savedSession = dutchPaySessionRepository.save(session);
@@ -453,7 +453,7 @@ public class DutchPayService {
 
             dutchPayParticipantRepository.save(
                     DutchPayParticipantEntity.invited(session, inviteeUserId, null, now));
-            notificationEventPublisher.publishDutchInvited(sessionId, inviteeUserId, session.getOrder_name());
+            notificationEventPublisher.publishDutchInvited(sessionId, inviteeUserId, session.getMerchant_name());
         }
 
         return publishAndReturn(sessionId, "PARTICIPANTS_INVITED");
@@ -480,7 +480,7 @@ public class DutchPayService {
         uniqueUserIds.forEach(inviteeUserId -> notificationEventPublisher.publishDutchInviteRequested(
                 sessionId,
                 inviteeUserId,
-                session.getOrder_name(),
+                session.getMerchant_name(),
                 inviteUrl));
 
         return DutchPayInviteNotificationResponse.builder()
@@ -639,7 +639,7 @@ public class DutchPayService {
                 .forEach(participant -> notificationEventPublisher.publishDutchConfirmed(
                         sessionId,
                         participant.getUser_id(),
-                        session.getOrder_name()));
+                        session.getMerchant_name()));
 
         if (request != null && request.getSplit_method() != null && !request.getSplit_method().isBlank()) {
             SplitMethod splitMethod = parseSplitMethod(request.getSplit_method());
@@ -707,8 +707,8 @@ public class DutchPayService {
                 || request.getMerchant_id() == null
                 || request.getTotal_amount() == null
                 || request.getTotal_amount() <= 0
-                || request.getOrder_name() == null
-                || request.getOrder_name().isBlank()) {
+                || request.getMerchant_name() == null
+                || request.getMerchant_name().isBlank()) {
             throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
     }
