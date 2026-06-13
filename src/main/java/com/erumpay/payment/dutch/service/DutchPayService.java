@@ -259,11 +259,11 @@ public class DutchPayService {
         if (!paidResult) {
             recalculateHostFinalAmount(session, participants, now);
         }
-        boolean allMembersPaid = allPayableMembersPaid(session, participants);
+        boolean allMembersSettled = allPayableMembersSettled(session, participants);
 
         return publishAndReturn(
                 sessionId,
-                allMembersPaid
+                allMembersSettled
                         ? "HOST_FINAL_PAYMENT_REQUIRED"
                         : paidResult
                                 ? "PARTICIPANT_PAYMENT_PAID"
@@ -506,10 +506,10 @@ public class DutchPayService {
                 .build();
     }
 
-    // [be] 영은 260523 1120 | 링크 수락 시 토큰을 검증하고 참여자를 INVITED 상태로 추가한다
+    // [be] 영은 260523 1120 | 링크 수락 시 토큰을 검증하고 참여자를 JOINED 상태로 추가한다
     @Transactional
     public DutchPaySessionDetailResponse acceptInviteLink(Long userId, String inviteToken) {
-        // [be] 영은 260610 | 거절했던 사용자가 같은 링크로 재입장하면 기존 REJECTED row를 INVITED로 복구한다.
+        // [be] 영은 260610 | 거절했던 사용자가 같은 링크로 재입장하면 기존 REJECTED row를 참여 상태로 복구한다.
         if (userId == null || inviteToken == null || inviteToken.isBlank()) {
             throw new CustomException(ErrorCode.DUTCH_INVITE_TOKEN_INVALID);
         }
@@ -527,15 +527,45 @@ public class DutchPayService {
                 .orElse(null);
         LocalDateTime now = LocalDateTime.now();
         if (existingParticipant == null) {
-            dutchPayParticipantRepository.save(
-                    DutchPayParticipantEntity.invited(session, userId, null, now));
+            DutchPayParticipantEntity participant = DutchPayParticipantEntity.invited(session, userId, null, now);
+            participant.join(now);
+            dutchPayParticipantRepository.save(participant);
+        } else if (existingParticipant.getStatus() == ParticipantStatus.INVITED) {
+            existingParticipant.join(now);
         } else if (existingParticipant.getStatus() == ParticipantStatus.REJECTED) {
-            existingParticipant.reopenInvite(now);
+            ensureRejectedParticipantCanRejoin(session);
+            existingParticipant.reopenInvite(now, session.getParticipants_confirmed_at() != null);
         } else {
             throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
         }
 
         return publishAndReturn(sessionId, "INVITE_LINK_ACCEPTED");
+    }
+
+    // [be] 조보름 260613 | 알림/메인에서 토큰 없이 진입한 초대 참여자를 실제 참여 상태로 전환한다.
+    @Transactional
+    public DutchPaySessionDetailResponse joinInvitedParticipant(Long userId, Long sessionId) {
+        if (userId == null || sessionId == null) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
+        }
+
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureInProgress(session);
+        if (userId.equals(session.getHost_user_id())) {
+            throw new CustomException(ErrorCode.DUTCH_DUPLICATED_PARTICIPANT);
+        }
+
+        DutchPayParticipantEntity participant = dutchPayParticipantRepository
+                .findParticipantForPaymentUpdate(sessionId, userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND));
+        if (participant.getStatus() == ParticipantStatus.INVITED) {
+            participant.join(LocalDateTime.now());
+        } else if (participant.getStatus() != ParticipantStatus.JOINED
+                && participant.getStatus() != ParticipantStatus.PENDING) {
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
+        }
+
+        return publishAndReturn(sessionId, "INVITE_JOINED");
     }
 
     // [be] 영은 260523 1120 | 참여자가 초대를 거절하면 REJECTED로 바꾸고 CUSTOM 금액은 다시 계산한다
@@ -632,10 +662,19 @@ public class DutchPayService {
         if (participants.isEmpty()) {
             throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND);
         }
+        boolean hasJoinedMember = participants.stream()
+                .anyMatch(participant ->
+                        !participant.getUser_id().equals(session.getHost_user_id())
+                                && participant.getStatus() == ParticipantStatus.JOINED);
+        if (!hasJoinedMember) {
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND);
+        }
 
+        session.confirmParticipants(now);
         participants.forEach(participant -> participant.confirm(now));
         participants.stream()
                 .filter(participant -> !participant.getUser_id().equals(session.getHost_user_id()))
+                .filter(participant -> participant.getStatus() == ParticipantStatus.PENDING)
                 .forEach(participant -> notificationEventPublisher.publishDutchConfirmed(
                         sessionId,
                         participant.getUser_id(),
@@ -655,10 +694,27 @@ public class DutchPayService {
     public DutchPaySessionDetailResponse requestPayment(Long hostUserId, Long sessionId) {
         DutchPaySessionEntity session = getSessionOrThrow(sessionId);
         ensureHostInProgress(session, hostUserId);
+        List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
+        ensureAllMemberAmountsEntered(session, participants);
 
-        session.requestPayment(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        session.confirmAmount(now);
+        session.requestPayment(now);
 
         return publishAndReturn(sessionId, "PAYMENT_REQUESTED");
+    }
+
+    // [be] 260613 | 대표자가 참여자 입력 금액을 확정하면 결제 요청 전 대기 단계로 전환한다.
+    @Transactional
+    public DutchPaySessionDetailResponse confirmAmount(Long hostUserId, Long sessionId) {
+        DutchPaySessionEntity session = getSessionOrThrow(sessionId);
+        ensureHostInProgress(session, hostUserId);
+        List<DutchPayParticipantEntity> participants = getParticipants(sessionId);
+        ensureAllMemberAmountsEntered(session, participants);
+
+        session.confirmAmount(LocalDateTime.now());
+
+        return publishAndReturn(sessionId, "AMOUNT_CONFIRMED");
     }
 
     // [be] 영은 260523 1120 | EQUAL은 즉시 균등 배분하고 CUSTOM은 대표자에게 전체 금액을 둔다
@@ -697,6 +753,9 @@ public class DutchPayService {
         ensureInProgress(session);
         if (session.getSplit_method() != SplitMethod.CUSTOM || userId.equals(session.getHost_user_id())) {
             throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_PAYABLE);
+        }
+        if (session.getAmount_confirmed_at() != null || session.getPayment_requested_at() != null) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
         }
 
         DutchPayParticipantEntity participant = dutchPayParticipantRepository
@@ -894,6 +953,35 @@ public class DutchPayService {
     // [be] 영은 260523 1120 | 화면 응답과 배분 계산에 필요한 참여자 목록을 participant_id 순서로 조회한다
     private List<DutchPayParticipantEntity> getParticipants(Long sessionId) {
         return dutchPayParticipantRepository.findBySessionIdOrderByParticipantId(sessionId);
+    }
+
+    private void ensureAllMemberAmountsEntered(
+            DutchPaySessionEntity session,
+            List<DutchPayParticipantEntity> participants) {
+        if (participants == null || participants.stream().noneMatch(participant ->
+                !participant.getUser_id().equals(session.getHost_user_id())
+                        && participant.getStatus() != ParticipantStatus.REJECTED
+                        && participant.getStatus() != ParticipantStatus.TIMEOUT)) {
+            throw new CustomException(ErrorCode.DUTCH_PARTICIPANT_NOT_FOUND);
+        }
+
+        boolean hasIncompleteMember = participants.stream()
+                .anyMatch(participant ->
+                        !participant.getUser_id().equals(session.getHost_user_id())
+                                && participant.getStatus() == ParticipantStatus.PENDING
+                                && participant.getAmount() == null);
+
+        if (hasIncompleteMember) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
+        }
+
+        recalculateHostCustomAmount(session, participants, LocalDateTime.now());
+    }
+
+    private void ensureRejectedParticipantCanRejoin(DutchPaySessionEntity session) {
+        if (session.getAmount_confirmed_at() != null || session.getPayment_requested_at() != null) {
+            throw new CustomException(ErrorCode.DUTCH_INVALID_REQUEST);
+        }
     }
 
     // [be] 영은 260523 1120 | 현재 세션과 참여자 목록을 화면 응답 DTO로 변환한다
@@ -1106,14 +1194,27 @@ public class DutchPayService {
         return hostFinalAmount;
     }
 
-    // [be] 영은 260526 1620 | 대표자를 제외한 실제 부담 참여자가 모두 PAID인지 확인한다
-    private boolean allPayableMembersPaid(
+    // [be] 260613 | 대표자를 제외한 실제 부담 참여자가 모두 결제 완료 또는 실패로 정리됐는지 확인한다.
+    private boolean allPayableMembersSettled(
             DutchPaySessionEntity session,
             List<DutchPayParticipantEntity> participants) {
-        return participants.stream()
+        List<DutchPayParticipantEntity> members = participants.stream()
                 .filter(participant -> !participant.getUser_id().equals(session.getHost_user_id()))
-                .filter(participant -> participant.getStatus() != ParticipantStatus.REJECTED)
-                .allMatch(participant -> participant.getStatus() == ParticipantStatus.PAID);
+                .filter(participant -> participant.getStatus() != ParticipantStatus.TIMEOUT)
+                .filter(participant ->
+                        participant.getStatus() != ParticipantStatus.REJECTED ||
+                                isFailedPaymentParticipant(participant))
+                .toList();
+
+        return !members.isEmpty()
+                && members.stream().allMatch(participant ->
+                        participant.getStatus() == ParticipantStatus.PAID
+                                || isFailedPaymentParticipant(participant));
+    }
+
+    private boolean isFailedPaymentParticipant(DutchPayParticipantEntity participant) {
+        return participant.getStatus() == ParticipantStatus.REJECTED
+                && (participant.getPayment() != null || participant.getAmount() != null);
     }
 
     private boolean isParticipantPaymentPaid(String status) {
