@@ -64,3 +64,9 @@ dependencyManagement {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+// [be] 영은 260612 | plain jar 생성을 끄고 부팅 가능한 bootJar만 남긴다.
+// Dockerfile의 COPY build/libs/*.jar 가 plain jar를 잘못 집어 "Invalid or corrupt jarfile"이 나는 것을 방지.
+tasks.named('jar') {
+    enabled = false
+}
