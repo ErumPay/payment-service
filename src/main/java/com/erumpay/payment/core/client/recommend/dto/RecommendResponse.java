@@ -29,6 +29,7 @@ public class RecommendResponse {
     // @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Result {
         private String strategyType;
+        private Boolean isBest;
         private Long totalBenefitAmount;
         private List<Card> cards;
         private String reason;
