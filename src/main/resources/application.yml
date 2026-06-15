@@ -5,6 +5,11 @@ spring:
   application:
     name: payment
 
+  cloud:
+    openfeign:
+      micrometer:
+        enabled: true
+
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
