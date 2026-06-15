@@ -67,10 +67,9 @@ public class CorePgPaymentService {
     private static final String HOST_AUTH_STATUS_FAILED = "FAILED";
     private static final String PARTICIPANT_PAYMENT_STATUS_PAID = "PAID";
     private static final String PARTICIPANT_PAYMENT_STATUS_FAILED = "FAILED";
-    private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
-
     private final PgClient pgClient;
     private final CorePgPaymentPersistenceService corePgPaymentPersistenceService;
+    private final CoreRecommendationCacheService coreRecommendationCacheService;
     private final DutchPayService dutchPayService;
     private final RemotePayService remotePayService;
     private final CardClient cardClient;
@@ -457,21 +456,7 @@ public class CorePgPaymentService {
 
     // [be] 다윤 260603 21:00 | redis에 캐시된 추천 응답 조회
     private RecommendResponse loadCachedRecommendation(Long paymentId) {
-        String cacheKey = RECOMMENDATION_CACHE_KEY_PREFIX + paymentId;
-        try {
-            String cachedRecommendation = stringRedisTemplate.opsForValue().get(cacheKey);
-            if (cachedRecommendation == null || cachedRecommendation.isBlank()) {
-                log.warn("recommendation cache missing. paymentId={}, key={}", paymentId, cacheKey);
-                throw new CustomException(ErrorCode.RECOMMENDATION_SELECTION_INVALID);
-            }
-
-            return objectMapper.readValue(cachedRecommendation, RecommendResponse.class);
-        } catch (CustomException e) {
-            throw e;
-        } catch (JsonProcessingException | RuntimeException e) {
-            log.warn("recommendation cache read failed. paymentId={}, key={}", paymentId, cacheKey, e);
-            throw new CustomException(ErrorCode.REC_CACHE_READ_FAILED, e);
-        }
+        return coreRecommendationCacheService.loadOrThrow(paymentId);
     }
 
     // [be] 다윤 260603 21:00 | 요청 strategyType에 해당하는 추천 조합 조회

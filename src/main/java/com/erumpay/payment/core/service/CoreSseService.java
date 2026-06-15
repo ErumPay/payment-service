@@ -13,6 +13,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.erumpay.payment.core.client.recommend.dto.RecommendResponse;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.erumpay.payment.core.domain.dto.response.CoreSseEventResponse;
@@ -34,6 +35,7 @@ public class CoreSseService {
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
     private final CoreSseTopicProperties coreSseTopicProperties;
+    private final CoreRecommendationCacheService coreRecommendationCacheService;
     private final Map<Long, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
     private final Map<Long, CachedRecommendationEvent> recommendationEvents = new ConcurrentHashMap<>();
     private final Map<Long, CachedMainCardEvent> mainCardEvents = new ConcurrentHashMap<>();
@@ -94,11 +96,12 @@ public class CoreSseService {
     // [be] 다윤 260601 | Redis에서 전달된 코어 SSE 이벤트를 현재 인스턴스의 로컬 SSE 연결에 전송한다.
     public void applyPaymentUpdatedFromRedis(Long paymentId, CoreSseEventResponse event) {
         // log.info("applyPaymentUpdatedFromRedis called.");
-        cacheRecommendationEventIfNeeded(paymentId, event);
-        cacheMainCardEventIfNeeded(paymentId, event);
-        sendLocalPaymentUpdated(paymentId, event);
+        CoreSseEventResponse resolvedEvent = resolveEventForDispatch(paymentId, event);
+        cacheRecommendationEventIfNeeded(paymentId, resolvedEvent);
+        cacheMainCardEventIfNeeded(paymentId, resolvedEvent);
+        sendLocalPaymentUpdated(paymentId, resolvedEvent);
 
-        if (shouldCompleteSubscriptions(event)) {
+        if (shouldCompleteSubscriptions(resolvedEvent)) {
             completeSubscriptions(paymentId);
         }
     }
@@ -182,16 +185,8 @@ public class CoreSseService {
     }
 
     private void replayCachedRecommendationIfPresent(SseEmitter emitter, Long paymentId) {
-        log.info("replayCachedRecommendationIfPresent called.");
-        CachedRecommendationEvent cachedEvent = recommendationEvents.get(paymentId);
-
-        if (cachedEvent == null) {
-            return;
-        }
-
-        long ageMs = System.currentTimeMillis() - cachedEvent.createdAtMs();
-        if (ageMs > RECOMMENDATION_CACHE_TTL_MS) {
-            recommendationEvents.remove(paymentId, cachedEvent);
+        CoreSseEventResponse recommendationEvent = resolveRecommendationEventForReplay(paymentId);
+        if (recommendationEvent == null) {
             return;
         }
 
@@ -199,12 +194,51 @@ public class CoreSseService {
             emitter.send(SseEmitter.event()
                     .name(PAYMENT_UPDATED_EVENT_NAME)
                     .id(String.valueOf(paymentId))
-                    .data(cachedEvent.event()));
+                    .data(recommendationEvent));
         } catch (IOException e) {
             log.warn("SSE recommendation replay send failed. paymentId={}", paymentId, e);
             emitter.completeWithError(e);
             removeEmitter(paymentId, emitter);
         }
+    }
+
+    CoreSseEventResponse resolveEventForDispatch(Long paymentId, CoreSseEventResponse event) {
+        if (event == null || event.getEventType() != CoreSseEventType.RECOMMENDATION_SUCCEEDED) {
+            return event;
+        }
+
+        return coreRecommendationCacheService.find(paymentId)
+                .map(recommendResponse -> CoreSseEventResponse.builder()
+                        .eventType(event.getEventType())
+                        .paymentId(paymentId)
+                        .payload(recommendResponse)
+                        .occurredAt(event.getOccurredAt())
+                        .build())
+                .orElse(event);
+    }
+
+    CoreSseEventResponse resolveRecommendationEventForReplay(Long paymentId) {
+        CachedRecommendationEvent cachedEvent = recommendationEvents.get(paymentId);
+        if (cachedEvent != null) {
+            long ageMs = System.currentTimeMillis() - cachedEvent.createdAtMs();
+            if (ageMs <= RECOMMENDATION_CACHE_TTL_MS) {
+                return cachedEvent.event();
+            }
+            recommendationEvents.remove(paymentId, cachedEvent);
+        }
+
+        return coreRecommendationCacheService.find(paymentId)
+                .map(recommendResponse -> toRecommendationReplayEvent(paymentId, recommendResponse))
+                .orElse(null);
+    }
+
+    private CoreSseEventResponse toRecommendationReplayEvent(Long paymentId, RecommendResponse recommendResponse) {
+        CoreSseEventResponse event = CoreSseEventResponse.of(
+                CoreSseEventType.RECOMMENDATION_SUCCEEDED,
+                paymentId,
+                recommendResponse);
+        recommendationEvents.put(paymentId, new CachedRecommendationEvent(event, System.currentTimeMillis()));
+        return event;
     }
 
     @Scheduled(fixedDelay = 1, timeUnit = TimeUnit.MINUTES)

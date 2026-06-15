@@ -99,8 +99,6 @@ public class CoreService {
     private static final String SPLIT_CANCEL_REASON = "사용자 요청으로 분할결제 전체 취소";
     private static final String RECOMMENDATION_STATUS_PENDING = "PENDING";
     private static final String RECOMMENDATION_STATUS_NOT_APPLICABLE = "NOT_APPLICABLE";
-    private static final String RECOMMENDATION_CACHE_KEY_PREFIX = "payment:recommendation:";
-    private static final Duration RECOMMENDATION_CACHE_TTL = Duration.ofMinutes(30);
     private static final ZoneId PAYMENT_HISTORY_BUSINESS_ZONE = ZoneId.of("Asia/Seoul");
     private static final List<CoreEntity.PaymentStatus> WITHDRAWAL_BLOCKING_STATUSES = List.of(
             CoreEntity.PaymentStatus.PAY_PENDING,
@@ -131,6 +129,7 @@ public class CoreService {
     private final RecommendClient recommendClient;
     private final RecommendFeignErrorMapper recommendFeignErrorMapper;
     private final CoreSseService coreSseService;
+    private final CoreRecommendationCacheService coreRecommendationCacheService;
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate stringRedisTemplate;
     private final PgFeignErrorMapper pgFeignErrorMapper;
@@ -1584,7 +1583,7 @@ public class CoreService {
             }
             log.info("recommend list response:\n{}",
                     objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(recommendList));
-            cacheRecommendation(payment.getPaymentId(), recommendList);
+            coreRecommendationCacheService.save(payment.getPaymentId(), recommendList);
 
             coreSseService.publishPaymentUpdated(
                     payment.getPaymentId(),
@@ -1604,26 +1603,6 @@ public class CoreService {
             log.error("recommend request unexpected error. paymentId={}, userId={}",
                     payment.getPaymentId(), userId, e);
             pushRecommendFailedEvent(payment.getPaymentId(), ErrorCode.REC_INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    private void cacheRecommendation(Long paymentId, RecommendResponse recommendList) {
-        if (paymentId == null || recommendList == null || recommendList.getResults() == null) {
-            return;
-        }
-
-        String cacheKey = RECOMMENDATION_CACHE_KEY_PREFIX + paymentId;
-        try {
-            stringRedisTemplate.opsForValue().set(
-                    cacheKey,
-                    objectMapper.writeValueAsString(recommendList),
-                    RECOMMENDATION_CACHE_TTL);
-            log.info("recommendation cache saved. key={}, ttlSeconds={}",
-                    cacheKey,
-                    RECOMMENDATION_CACHE_TTL.toSeconds());
-        } catch (JsonProcessingException | RuntimeException e) {
-            log.warn("recommendation cache save failed. paymentId={}", paymentId, e);
-            throw new CustomException(ErrorCode.REC_CACHE_WRITE_FAILED, e);
         }
     }
 
